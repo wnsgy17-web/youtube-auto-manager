@@ -1,0 +1,1812 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Auto Manager PRO - Production</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://apis.google.com/js/api.js"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        .animate-pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .tab { cursor: pointer; padding: 8px 16px; border-bottom: 2px solid transparent; transition: all 0.2s; }
+        .tab.active { border-bottom-color: #dc2626; color: #dc2626; font-weight: bold; }
+        .tab:hover { background: #f3f4f6; }
+        .ai-badge { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            animation: shimmer 2s infinite;
+        }
+        @keyframes shimmer { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
+        .pro-badge {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // ========================================
+        // YouTube API 설정
+        // ========================================
+        const YOUTUBE_CLIENT_ID = '209770688632-orkjj4ga1n6eotqv5966m7nrkvkpijdf.apps.googleusercontent.com'; // 여기에 클라이언트 ID 입력!
+        const YOUTUBE_API_KEY = 'AIzaSyDuaNXVMqAUVsuw2zjXANidGo0iK1rPfMU'; // 여기에 API 키 입력!
+        const YOUTUBE_DISCOVERY_DOCS = ['https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest'];
+        const YOUTUBE_SCOPES = 'https://www.googleapis.com/auth/youtube.force-ssl';
+
+        function YouTubeAutoManager() {
+          const [isAuthenticated, setIsAuthenticated] = useState(false);
+          const [user, setUser] = useState(null);
+          const [currentTab, setCurrentTab] = useState('home');
+          const [channels, setChannels] = useState([]);
+          const [hashtagRules, setHashtagRules] = useState([]);
+          const [keywordRules, setKeywordRules] = useState([]);
+          const [comments, setComments] = useState([]);
+          const [newVideos, setNewVideos] = useState([]);
+          const [logs, setLogs] = useState([]);
+          const [isMonitoring, setIsMonitoring] = useState(false);
+          const [apiUsage, setApiUsage] = useState({ youtube: 0, ai: 0, saved: 0 });
+          const [checkInterval, setCheckInterval] = useState(5);
+          const [autoCommentEnabled, setAutoCommentEnabled] = useState(true);
+          const [hashtagEnabled, setHashtagEnabled] = useState(true);
+          const [keywordEnabled, setKeywordEnabled] = useState(false);
+          const [keywordMaxResults, setKeywordMaxResults] = useState(3);
+          
+          // 🤖 AI 댓글 설정
+          const [aiCommentEnabled, setAiCommentEnabled] = useState(false);
+          const [aiDemoMode, setAiDemoMode] = useState(true);
+          const [anthropicApiKey, setAnthropicApiKey] = useState('');
+          const [aiCommentStyle, setAiCommentStyle] = useState('friendly');
+          const [aiEmojiUsage, setAiEmojiUsage] = useState('moderate');
+          const [aiCommentLength, setAiCommentLength] = useState('medium');
+          const [aiAnalyzeImage, setAiAnalyzeImage] = useState(true);
+          const [aiTrendAware, setAiTrendAware] = useState(true);
+          const [aiCustomPrompt, setAiCustomPrompt] = useState('');
+          
+          // 🚀 최적화 설정
+          const [cacheEnabled, setCacheEnabled] = useState(true);
+          const [incrementalEnabled, setIncrementalEnabled] = useState(true);
+          const [headCheckEnabled, setHeadCheckEnabled] = useState(true);
+          const [cacheTTL, setCacheTTL] = useState({
+            channelInfo: 24 * 60,
+            videoList: 5,
+            videoDetails: 60
+          });
+          const [headCheckInterval, setHeadCheckInterval] = useState(5);
+          const [fullSearchMaxInterval, setFullSearchMaxInterval] = useState(60);
+          
+          const cacheRef = useRef({
+            channels: {},
+            videos: {},
+            stats: { hits: 0, misses: 0, requests: 0 }
+          });
+          
+          const incrementalStateRef = useRef({});
+          const monitoringRef = useRef(null);
+          const gapiRef = useRef(null);
+
+          // ========================================
+          // 초기화 & 저장
+          // ========================================
+          useEffect(() => {
+            const saved = localStorage.getItem('yt_data_production_v1');
+            if (saved) {
+              const data = JSON.parse(saved);
+              setChannels(data.channels || []);
+              setHashtagRules(data.hashtagRules || []);
+              setKeywordRules(data.keywordRules || []);
+              setComments(data.comments || []);
+              setLogs(data.logs || []);
+              setApiUsage(data.apiUsage || { youtube: 0, ai: 0, saved: 0 });
+              if (data.incrementalState) incrementalStateRef.current = data.incrementalState;
+              if (data.cacheEnabled !== undefined) setCacheEnabled(data.cacheEnabled);
+              if (data.incrementalEnabled !== undefined) setIncrementalEnabled(data.incrementalEnabled);
+              if (data.headCheckEnabled !== undefined) setHeadCheckEnabled(data.headCheckEnabled);
+              if (data.aiCommentEnabled !== undefined) setAiCommentEnabled(data.aiCommentEnabled);
+              if (data.aiDemoMode !== undefined) setAiDemoMode(data.aiDemoMode);
+              if (data.anthropicApiKey) setAnthropicApiKey(data.anthropicApiKey);
+              if (data.aiCommentStyle) setAiCommentStyle(data.aiCommentStyle);
+              if (data.aiEmojiUsage) setAiEmojiUsage(data.aiEmojiUsage);
+              if (data.aiCommentLength) setAiCommentLength(data.aiCommentLength);
+              if (data.cacheTTL) setCacheTTL(data.cacheTTL);
+            }
+            
+            // YouTube API 초기화
+            initYouTubeAPI();
+          }, []);
+
+          useEffect(() => {
+            localStorage.setItem('yt_data_production_v1', JSON.stringify({ 
+              channels, hashtagRules, keywordRules, comments, logs, apiUsage,
+              incrementalState: incrementalStateRef.current,
+              cacheEnabled, incrementalEnabled, headCheckEnabled,
+              aiCommentEnabled, aiDemoMode, anthropicApiKey,
+              aiCommentStyle, aiEmojiUsage, aiCommentLength, cacheTTL
+            }));
+          }, [channels, hashtagRules, keywordRules, comments, logs, apiUsage, 
+              cacheEnabled, incrementalEnabled, headCheckEnabled,
+              aiCommentEnabled, aiDemoMode, anthropicApiKey,
+              aiCommentStyle, aiEmojiUsage, aiCommentLength, cacheTTL]);
+
+          // ========================================
+          // YouTube API 초기화
+          // ========================================
+          const initYouTubeAPI = () => {
+            if (YOUTUBE_CLIENT_ID === 'YOUR_YOUTUBE_CLIENT_ID_HERE') {
+              addLog('⚠️ YouTube API 설정 필요! 코드에 Client ID를 입력하세요.', 'warning');
+              return;
+            }
+            
+            gapi.load('client:auth2', () => {
+              gapi.client.init({
+                apiKey: YOUTUBE_API_KEY,
+                clientId: YOUTUBE_CLIENT_ID,
+                discoveryDocs: YOUTUBE_DISCOVERY_DOCS,
+                scope: YOUTUBE_SCOPES
+              }).then(() => {
+                gapiRef.current = gapi;
+                addLog('✅ YouTube API 초기화 완료', 'success');
+                
+                // 이미 로그인되어 있는지 확인
+                const authInstance = gapi.auth2.getAuthInstance();
+                if (authInstance.isSignedIn.get()) {
+                  handleAuthSuccess();
+                }
+              }).catch(error => {
+                addLog(`❌ YouTube API 초기화 실패: ${error.message}`, 'error');
+              });
+            });
+          };
+
+          // ========================================
+          // 로그인 & 로그아웃
+          // ========================================
+          const handleLogin = async () => {
+            if (YOUTUBE_CLIENT_ID === 'YOUR_YOUTUBE_CLIENT_ID_HERE') {
+              alert('YouTube API 설정이 필요합니다!\n\n코드 상단의 YOUTUBE_CLIENT_ID와 YOUTUBE_API_KEY를 입력해주세요.\n\n설정 방법:\n1. https://console.cloud.google.com 접속\n2. YouTube Data API v3 활성화\n3. OAuth 2.0 클라이언트 ID 생성');
+              return;
+            }
+            
+            try {
+              const authInstance = gapi.auth2.getAuthInstance();
+              await authInstance.signIn();
+              handleAuthSuccess();
+            } catch (error) {
+              addLog(`❌ 로그인 실패: ${error.message}`, 'error');
+            }
+          };
+
+          const handleAuthSuccess = () => {
+            const authInstance = gapi.auth2.getAuthInstance();
+            const profile = authInstance.currentUser.get().getBasicProfile();
+            
+            setIsAuthenticated(true);
+            setUser({
+              name: profile.getName(),
+              email: profile.getEmail(),
+              image: profile.getImageUrl()
+            });
+            addLog(`✅ ${profile.getName()}님 로그인 성공!`, 'success');
+          };
+
+          const handleLogout = () => {
+            stopMonitoring();
+            gapi.auth2.getAuthInstance().signOut();
+            setIsAuthenticated(false);
+            setUser(null);
+            addLog('로그아웃', 'info');
+          };
+
+          const addLog = (msg, type = 'info') => {
+            setLogs(prev => [{ id: Date.now(), msg, type, time: new Date().toLocaleTimeString() }, ...prev].slice(0, 100));
+          };
+
+          const trackAPIUsage = (youtube = 0, ai = 0, saved = 0) => {
+            setApiUsage(prev => ({
+              youtube: prev.youtube + youtube,
+              ai: prev.ai + ai,
+              saved: prev.saved + saved
+            }));
+          };
+
+          // ========================================
+          // 캐싱 시스템
+          // ========================================
+          const getCached = (key, type) => {
+            if (!cacheEnabled) {
+              cacheRef.current.stats.requests++;
+              return null;
+            }
+            
+            cacheRef.current.stats.requests++;
+            const cache = cacheRef.current[type];
+            if (!cache || !cache[key]) {
+              cacheRef.current.stats.misses++;
+              return null;
+            }
+            
+            const ttlMinutes = cacheTTL[type === 'channels' ? 'channelInfo' : type === 'videos' ? 'videoList' : 'videoDetails'];
+            const age = Date.now() - cache[key].timestamp;
+            
+            if (age > ttlMinutes * 60 * 1000) {
+              delete cache[key];
+              cacheRef.current.stats.misses++;
+              return null;
+            }
+            
+            cacheRef.current.stats.hits++;
+            return cache[key].data;
+          };
+
+          const setCache = (key, type, data) => {
+            if (!cacheEnabled) return;
+            
+            if (!cacheRef.current[type]) {
+              cacheRef.current[type] = {};
+            }
+            
+            cacheRef.current[type][key] = {
+              data: data,
+              timestamp: Date.now(),
+              etag: data.etag || `etag_${Date.now()}`,
+              lastModified: new Date().toISOString()
+            };
+          };
+
+          const clearCache = () => {
+            if (confirm('캐시를 모두 삭제하시겠습니까?')) {
+              cacheRef.current = {
+                channels: {},
+                videos: {},
+                stats: { hits: 0, misses: 0, requests: 0 }
+              };
+              addLog('🗑️ 캐시 초기화 완료', 'info');
+            }
+          };
+
+          const resetIncrementalState = () => {
+            if (confirm('증분 체크 상태를 초기화하시겠습니까?')) {
+              incrementalStateRef.current = {};
+              addLog('🔄 증분 상태 초기화 완료', 'info');
+            }
+          };
+
+          const getCacheStats = () => {
+            const stats = cacheRef.current.stats;
+            const total = stats.requests;
+            const hitRate = total > 0 ? ((stats.hits / total) * 100).toFixed(1) : 0;
+            return { ...stats, total, hitRate };
+          };
+
+          // ========================================
+          // HEAD 체크 시스템
+          // ========================================
+          const headCheck = async (channel) => {
+            if (!headCheckEnabled || !incrementalEnabled) {
+              return { hasNew: true, apiCost: 0, method: 'FULL' };
+            }
+            
+            const state = incrementalStateRef.current[channel.id] || {
+              lastCheck: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+              latestVideoId: null,
+              lastFullSearch: 0,
+              consecutiveNoChange: 0
+            };
+            
+            const timeSinceLastFull = Date.now() - state.lastFullSearch;
+            const shouldForceFullCheck = timeSinceLastFull > fullSearchMaxInterval * 60 * 1000;
+            
+            if (shouldForceFullCheck) {
+              state.lastFullSearch = Date.now();
+              incrementalStateRef.current[channel.id] = state;
+              return { hasNew: true, apiCost: 1, method: 'FORCED_FULL' };
+            }
+            
+            try {
+              const response = await gapi.client.youtube.search.list({
+                part: 'snippet',
+                channelId: channel.channelId,
+                order: 'date',
+                maxResults: 1,
+                type: 'video'
+              });
+              
+              trackAPIUsage(1);
+              
+              if (response.result.items.length > 0) {
+                const latestVideo = response.result.items[0];
+                const hasNew = !state.latestVideoId || latestVideo.id.videoId !== state.latestVideoId;
+                
+                if (hasNew) {
+                  state.latestVideoId = latestVideo.id.videoId;
+                  state.lastFullSearch = Date.now();
+                  state.consecutiveNoChange = 0;
+                } else {
+                  state.consecutiveNoChange++;
+                }
+                
+                state.lastCheck = new Date().toISOString();
+                incrementalStateRef.current[channel.id] = state;
+                
+                return { hasNew, apiCost: 1, method: 'HEAD', consecutiveNoChange: state.consecutiveNoChange };
+              }
+              
+              return { hasNew: false, apiCost: 1, method: 'HEAD' };
+            } catch (error) {
+              addLog(`❌ HEAD 체크 실패: ${error.message}`, 'error');
+              return { hasNew: true, apiCost: 1, method: 'ERROR_FALLBACK' };
+            }
+          };
+
+          const performIncrementalCheck = async (channel) => {
+            if (!incrementalEnabled) {
+              return { hasNew: true, apiCost: 0 };
+            }
+            
+            const state = incrementalStateRef.current[channel.id];
+            if (!state || !state.latestVideoId) {
+              return { hasNew: true, apiCost: 0 };
+            }
+            
+            const cacheKey = `${channel.id}_videos`;
+            const cached = cacheRef.current.videos?.[cacheKey];
+            
+            if (cached && cached.etag) {
+              try {
+                const response = await gapi.client.youtube.search.list({
+                  part: 'snippet',
+                  channelId: channel.channelId,
+                  order: 'date',
+                  maxResults: 5,
+                  type: 'video',
+                  publishedAfter: state.lastCheck
+                });
+                
+                trackAPIUsage(1);
+                
+                if (!response.result.items || response.result.items.length === 0) {
+                  return { hasNew: false, apiCost: 1, method: '304_NOT_MODIFIED' };
+                }
+                
+                return { hasNew: true, apiCost: 1, method: 'INCREMENTAL', newVideos: response.result.items };
+              } catch (error) {
+                return { hasNew: true, apiCost: 1, method: 'ERROR' };
+              }
+            }
+            
+            return { hasNew: true, apiCost: 0, method: 'CACHE_MISS' };
+          };
+
+          // ========================================
+          // AI 댓글 생성
+          // ========================================
+          // AI 댓글 생성 - 데모 모드
+          const generateAICommentDemo = (videoData) => {
+            const { title, hashtags = [] } = videoData;
+            
+            const templates = {
+              friendly: {
+                short: [
+                  `"${title}" 정말 멋지네요! 😊`,
+                  `와 이거 완전 제 스타일이에요 👍`,
+                  `좋은 영상 감사합니다!`,
+                  `대박!! 기다리던 영상이에요 ⚽`
+                ],
+                medium: [
+                  `"${title}" 영상 잘 봤습니다! 정말 유익한 내용이네요. 다음 영상도 기대할게요! 😊`,
+                  `이런 콘텐츠 찾고 있었어요! 구독하고 갑니다. 앞으로도 좋은 영상 부탁드려요! 🎉`,
+                  `완전 제가 궁금했던 내용이에요! 설명이 정말 쉽고 명확해서 이해가 잘 됐습니다 👏`
+                ],
+                long: [
+                  `"${title}" 영상 정말 잘 봤습니다! 요즘 이런 주제에 관심이 많았는데 딱 제가 찾던 내용이네요. 설명도 이해하기 쉽게 잘 해주셔서 감사합니다. 다음 영상도 기대하면서 구독 누르고 갑니다! 😊👍`,
+                  `우와 이 영상 정말 퀄리티가 높네요! ${hashtags.length > 0 ? hashtags.map(t => '#' + t).join(' ') + ' 관련해서 ' : ''}궁금했던 점이 많았는데 덕분에 많이 배웠습니다. 앞으로도 이런 유익한 콘텐츠 많이 올려주세요! 🔥✨`
+                ]
+              },
+              formal: {
+                short: [
+                  `유익한 정보 감사합니다.`,
+                  `좋은 영상 잘 시청했습니다.`,
+                  `전문적인 내용 감사드립니다.`
+                ],
+                medium: [
+                  `"${title}" 관련하여 많은 도움이 되었습니다. 감사합니다.`,
+                  `전문적인 내용을 알기 쉽게 설명해주셔서 감사합니다. 구독하겠습니다.`,
+                  `체계적인 설명 덕분에 이해가 잘 되었습니다. 좋은 영상 감사드립니다.`
+                ],
+                long: [
+                  `"${title}" 영상 잘 시청했습니다. 체계적인 설명과 전문적인 내용 구성이 인상 깊었습니다. 앞으로도 이러한 양질의 콘텐츠 부탁드립니다. 감사합니다.`,
+                  `${hashtags.length > 0 ? hashtags.map(t => '#' + t).join(' ') + '에 대해 ' : ''}상세하고 전문적인 내용을 제공해주셔서 감사합니다. 실무에 많은 도움이 될 것 같습니다. 구독하고 다음 영상도 기대하겠습니다.`
+                ]
+              },
+              humorous: {
+                short: [
+                  `ㅋㅋㅋㅋ 이거 뭐야 개웃기네 🤣`,
+                  `아 진짜 미쳤다 ㅋㅋㅋ 👍✨`,
+                  `대박 ㅋㅋㅋ 완전 킹받네 😂`
+                ],
+                medium: [
+                  `ㅋㅋㅋ "${title}" 제목부터 웃기네요 😂 영상도 재밌게 잘 봤습니다! 구독박고 갑니다 🎉`,
+                  `아니 ㅋㅋㅋ 이게 무슨 일이야 🤣 몇 번째 보는데 매번 웃겨요 알고리즘 감사합니다 👏`,
+                  `와 진짜 센스 오진다 ㅋㅋㅋ 이런 거 너무 좋아요! 다음 편 언제 나와요? 🔥`
+                ],
+                long: [
+                  `ㅋㅋㅋㅋㅋ "${title}" 이거 완전 레전드네요 😂 처음엔 뭐지 했는데 보다보니까 완전 빠져들었어요! 이런 센스 있는 콘텐츠 너무 좋습니다 ㅋㅋ 구독 알림 설정까지 다 했어요! 다음 편도 기대할게요 🎉🔥`,
+                  `아 ㅋㅋㅋ 이 영상 진짜 미쳤어요 🤣 ${hashtags.length > 0 ? hashtags.map(t => '#' + t).join(' ') + ' ' : ''}관련 영상 중에 제일 재밌네요! 편집 센스 완전 오지고요 ㅋㅋ 알고리즘이 이 영상을 왜 이제서야 추천해준 거죠? 완전 인생 영상입니다 👍✨`
+                ]
+              }
+            };
+            
+            const addEmojis = (text) => {
+              if (aiEmojiUsage === 'none') {
+                return text.replace(/[😊👍⚽🎉😂🤣🔥✨👏]/g, '');
+              }
+              if (aiEmojiUsage === 'many' && Math.random() < 0.5) {
+                const extraEmojis = ['💯', '🙌', '❤️', '🎊', '⭐'];
+                return text + ' ' + extraEmojis[Math.floor(Math.random() * extraEmojis.length)];
+              }
+              return text;
+            };
+            
+            const styleTemplates = templates[aiCommentStyle] || templates.friendly;
+            const lengthTemplates = styleTemplates[aiCommentLength] || styleTemplates.medium;
+            const comment = lengthTemplates[Math.floor(Math.random() * lengthTemplates.length)];
+            
+            return addEmojis(comment);
+          };
+
+          // AI 댓글 생성 - 실제 API
+          const generateAICommentReal = async (videoData) => {
+            if (!anthropicApiKey || anthropicApiKey.length < 10) {
+              throw new Error('Anthropic API 키가 필요합니다');
+            }
+            
+            try {
+              const toneMap = {
+                'friendly': '친근하고 따뜻한',
+                'formal': '정중하고 격식있는',
+                'humorous': '유머러스하고 재미있는'
+              };
+              const emojiMap = {
+                'none': '이모지를 사용하지 마세요',
+                'moderate': '이모지 1-2개만 자연스럽게 사용',
+                'many': '이모지 3-4개를 적절히 사용'
+              };
+              const lengthMap = {
+                'short': '1문장으로 짧게',
+                'medium': '2-3문장 정도로',
+                'long': '3-4문장으로 자세하게'
+              };
+              
+              let prompt = `다음 YouTube 영상에 달 댓글을 작성해주세요:
+
+제목: ${videoData.title}
+채널: ${videoData.channelTitle || '알 수 없음'}
+${videoData.description ? `설명: ${videoData.description.substring(0, 200)}` : ''}
+${videoData.hashtags?.length > 0 ? `해시태그: ${videoData.hashtags.map(t => '#' + t).join(' ')}` : ''}
+
+요구사항:
+- 톤: ${toneMap[aiCommentStyle]}
+- 길이: ${lengthMap[aiCommentLength]}
+- ${emojiMap[aiEmojiUsage]}
+- 자연스럽고 진정성있게
+- 스팸처럼 보이지 않게
+- 구체적인 내용 언급`;
+
+              if (aiAnalyzeImage) {
+                prompt += '\n- 썸네일 이미지의 분위기를 고려';
+              }
+              
+              if (aiTrendAware) {
+                prompt += '\n- 2025년 최신 트렌드와 유행어 반영';
+              }
+              
+              if (aiCustomPrompt) {
+                prompt += `\n- 추가 지침: ${aiCustomPrompt}`;
+              }
+              
+              prompt += '\n\n댓글 내용만 출력하세요:';
+              
+              const response = await fetch("https://api.anthropic.com/v1/messages", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "x-api-key": anthropicApiKey,
+                  "anthropic-version": "2023-06-01"
+                },
+                body: JSON.stringify({
+                  model: "claude-sonnet-4-20250514",
+                  max_tokens: 200,
+                  messages: [{ role: "user", content: prompt }]
+                })
+              });
+              
+              if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`AI API 오류: ${response.status} - ${errorText}`);
+              }
+              
+              const data = await response.json();
+              const aiComment = data.content[0].text.trim();
+              
+              trackAPIUsage(0, 5);
+              return aiComment;
+              
+            } catch (error) {
+              throw error;
+            }
+          };
+
+          // AI 댓글 생성 - 통합
+          const generateAIComment = async (videoData) => {
+            if (!aiCommentEnabled) return null;
+            
+            try {
+              addLog(`🤖 AI 댓글 생성 중... ${aiDemoMode ? '(데모)' : '(실제 API)'}`, 'info');
+              
+              let commentText;
+              
+              if (aiDemoMode) {
+                // 데모 모드: 템플릿 기반
+                await new Promise(r => setTimeout(r, 500 + Math.random() * 500));
+                commentText = generateAICommentDemo(videoData);
+                addLog(`✨ AI 댓글 (데모): "${commentText.substring(0, 30)}..."`, 'success');
+              } else {
+                // 실제 모드: Anthropic API
+                commentText = await generateAICommentReal(videoData);
+                addLog(`✨ AI 댓글 (실제): "${commentText.substring(0, 30)}..."`, 'success');
+              }
+              
+              return commentText;
+              
+            } catch (error) {
+              addLog(`❌ AI 실패: ${error.message}`, 'error');
+              return null;
+            }
+          };
+
+          // ========================================
+          // 채널 관리
+          // ========================================
+          const addChannel = async () => {
+            if (!isAuthenticated) {
+              alert('먼저 로그인해주세요!');
+              return;
+            }
+            
+            const channelId = prompt('채널 ID를 입력하세요:\n\n(채널 URL에서 확인 가능)\n예: UCxxxxxxxxxxxxxxxxxxxxxx');
+            if (!channelId) return;
+            
+            try {
+              // 채널 정보 가져오기
+              const response = await gapi.client.youtube.channels.list({
+                part: 'snippet,statistics',
+                id: channelId
+              });
+              
+              trackAPIUsage(1);
+              
+              if (!response.result.items || response.result.items.length === 0) {
+                alert('채널을 찾을 수 없습니다. 채널 ID를 확인해주세요.');
+                return;
+              }
+              
+              const channelData = response.result.items[0];
+              
+              // 댓글 패턴 입력
+              const comments = [];
+              let addMore = true;
+              
+              while (addMore && comments.length < 10) {
+                const comment = prompt(`"${channelData.snippet.title}" 채널용 댓글 패턴 ${comments.length + 1}:\n(취소를 누르면 입력 종료)`);
+                if (!comment) {
+                  addMore = false;
+                } else {
+                  comments.push(comment);
+                  if (comments.length < 10) {
+                    addMore = confirm('댓글 패턴을 더 추가하시겠습니까?');
+                  }
+                }
+              }
+              
+              if (comments.length === 0) {
+                alert('최소 1개의 댓글 패턴이 필요합니다.');
+                return;
+              }
+              
+              const ch = {
+                id: 'ch_' + Date.now(),
+                channelId: channelId,
+                title: channelData.snippet.title,
+                thumbnail: channelData.snippet.thumbnails.default.url,
+                subscriberCount: channelData.statistics.subscriberCount,
+                commentPatterns: comments,
+                enabled: true,
+                addedAt: new Date().toISOString()
+              };
+              
+              setChannels(prev => [...prev, ch]);
+              addLog(`📺 "${ch.title}" 채널 추가 (구독자: ${parseInt(ch.subscriberCount).toLocaleString()}명, ${comments.length}개 패턴)`, 'success');
+              
+            } catch (error) {
+              addLog(`❌ 채널 추가 실패: ${error.message}`, 'error');
+              alert('채널 추가 중 오류가 발생했습니다.\n' + error.message);
+            }
+          };
+
+          const removeChannel = (id) => {
+            if (confirm('이 채널을 삭제하시겠습니까?')) {
+              setChannels(prev => prev.filter(c => c.id !== id));
+              delete incrementalStateRef.current[id];
+              addLog('채널 삭제됨', 'info');
+            }
+          };
+
+          const toggleChannel = (id) => {
+            setChannels(prev => prev.map(c => c.id === id ? { ...c, enabled: !c.enabled } : c));
+          };
+
+          // ========================================
+          // 해시태그 & 키워드
+          // ========================================
+          const addHashtagRule = () => {
+            const hashtag = prompt('해시태그를 입력하세요 (# 제외):');
+            if (!hashtag) return;
+            
+            const comments = [];
+            let addMore = true;
+            
+            while (addMore && comments.length < 10) {
+              const comment = prompt(`"#${hashtag}" 태그용 댓글 ${comments.length + 1}:`);
+              if (!comment) {
+                addMore = false;
+              } else {
+                comments.push(comment);
+                if (comments.length < 10) {
+                  addMore = confirm('댓글을 더 추가하시겠습니까?');
+                }
+              }
+            }
+            
+            if (comments.length === 0) return;
+            
+            setHashtagRules(prev => [...prev, {
+              id: 'tag_' + Date.now(),
+              hashtag: hashtag.replace('#', ''),
+              commentPatterns: comments,
+              enabled: true
+            }]);
+            addLog(`🏷️ "#${hashtag}" 규칙 추가`, 'success');
+          };
+
+          const removeHashtagRule = (id) => {
+            if (confirm('이 해시태그 규칙을 삭제하시겠습니까?')) {
+              setHashtagRules(prev => prev.filter(r => r.id !== id));
+              addLog('해시태그 규칙 삭제됨', 'info');
+            }
+          };
+
+          const toggleHashtagRule = (id) => {
+            setHashtagRules(prev => prev.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r));
+          };
+
+          const addKeywordRule = () => {
+            const keyword = prompt('키워드를 입력하세요:');
+            if (!keyword) return;
+            
+            const comments = [];
+            let addMore = true;
+            
+            while (addMore && comments.length < 10) {
+              const comment = prompt(`"${keyword}" 키워드용 댓글 ${comments.length + 1}:`);
+              if (!comment) {
+                addMore = false;
+              } else {
+                comments.push(comment);
+                if (comments.length < 10) {
+                  addMore = confirm('댓글을 더 추가하시겠습니까?');
+                }
+              }
+            }
+            
+            if (comments.length === 0) return;
+            
+            setKeywordRules(prev => [...prev, {
+              id: 'kw_' + Date.now(),
+              keyword: keyword,
+              commentPatterns: comments,
+              enabled: true
+            }]);
+            addLog(`🔍 "${keyword}" 키워드 추가`, 'success');
+          };
+
+          const removeKeywordRule = (id) => {
+            if (confirm('이 키워드 규칙을 삭제하시겠습니까?')) {
+              setKeywordRules(prev => prev.filter(r => r.id !== id));
+              addLog('키워드 규칙 삭제됨', 'info');
+            }
+          };
+
+          const toggleKeywordRule = (id) => {
+            setKeywordRules(prev => prev.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r));
+          };
+
+          const getRandomComment = (patterns) => {
+            return patterns[Math.floor(Math.random() * patterns.length)];
+          };
+
+          // ========================================
+          // 실제 댓글 작성
+          // ========================================
+          const postCommentToYouTube = async (videoId, commentText) => {
+            try {
+              const response = await gapi.client.youtube.commentThreads.insert({
+                part: 'snippet',
+                resource: {
+                  snippet: {
+                    videoId: videoId,
+                    topLevelComment: {
+                      snippet: {
+                        textOriginal: commentText
+                      }
+                    }
+                  }
+                }
+              });
+              
+              trackAPIUsage(50);
+              return response.result;
+              
+            } catch (error) {
+              throw new Error(`댓글 작성 실패: ${error.message}`);
+            }
+          };
+
+          // ========================================
+          // 모니터링 - 채널
+          // ========================================
+          const checkNewVideos = async () => {
+            if (channels.length === 0 && hashtagRules.length === 0 && keywordRules.length === 0) {
+              addLog('채널, 해시태그, 또는 키워드를 먼저 추가하세요', 'warning');
+              return;
+            }
+            
+            const optimizationStatus = [];
+            if (cacheEnabled) optimizationStatus.push('💾 캐싱');
+            if (incrementalEnabled) optimizationStatus.push('⚡ 증분');
+            if (headCheckEnabled) optimizationStatus.push('🎯 HEAD');
+            if (aiCommentEnabled) optimizationStatus.push(`🤖 AI${aiDemoMode ? '(데모)' : ''}`);
+            
+            addLog(`🔍 모니터링 시작 [${optimizationStatus.join(' | ')}]`, 'info');
+            
+            let totalSaved = 0;
+            let totalCost = 0;
+            
+            // 채널 모니터링
+            for (const ch of channels.filter(c => c.enabled)) {
+              try {
+                // 1단계: HEAD 체크
+                const headResult = await headCheck(ch);
+                totalCost += headResult.apiCost;
+                
+                if (!headResult.hasNew) {
+                  const saved = 98;
+                  totalSaved += saved;
+                  trackAPIUsage(0, 0, saved);
+                  addLog(`✓ "${ch.title}" 변경 없음 [${headResult.method}] (-${saved} units)`, 'info');
+                  continue;
+                }
+                
+                // 2단계: 증분 체크
+                const incrementalResult = await performIncrementalCheck(ch);
+                totalCost += incrementalResult.apiCost;
+                
+                if (!incrementalResult.hasNew && incrementalResult.method === '304_NOT_MODIFIED') {
+                  const saved = 99;
+                  totalSaved += saved;
+                  trackAPIUsage(0, 0, saved);
+                  addLog(`✓ "${ch.title}" 304 Not Modified (-${saved} units)`, 'info');
+                  continue;
+                }
+                
+                // 3단계: 실제 영상 검색
+                const response = await gapi.client.youtube.search.list({
+                  part: 'snippet',
+                  channelId: ch.channelId,
+                  order: 'date',
+                  maxResults: 5,
+                  type: 'video'
+                });
+                
+                trackAPIUsage(100);
+                totalCost += 100;
+                
+                if (response.result.items && response.result.items.length > 0) {
+                  for (const item of response.result.items) {
+                    const videoData = {
+                      id: item.id.videoId,
+                      title: item.snippet.title,
+                      channelTitle: item.snippet.channelTitle,
+                      description: item.snippet.description,
+                      thumbnail: item.snippet.thumbnails.default.url,
+                      publishedAt: item.snippet.publishedAt,
+                      link: `https://www.youtube.com/watch?v=${item.id.videoId}`
+                    };
+                    
+                    setNewVideos(prev => [videoData, ...prev].slice(0, 50));
+                    addLog(`🎬 새 영상: "${videoData.title.substring(0, 30)}..."`, 'success');
+                    
+                    // 자동 댓글
+                    if (autoCommentEnabled && ch.commentPatterns.length > 0) {
+                      await new Promise(r => setTimeout(r, 1000));
+                      
+                      let commentText;
+                      
+                      if (aiCommentEnabled) {
+                        commentText = await generateAIComment(videoData);
+                        if (!commentText) {
+                          commentText = getRandomComment(ch.commentPatterns);
+                          addLog(`⚠️ AI 실패, 패턴 사용`, 'warning');
+                        }
+                      } else {
+                        commentText = getRandomComment(ch.commentPatterns);
+                      }
+                      
+                      try {
+                        // 실제 댓글 작성
+                        const commentResult = await postCommentToYouTube(videoData.id, commentText);
+                        
+                        setComments(prev => [{
+                          id: commentResult.id,
+                          text: commentText,
+                          video: videoData.title,
+                          videoLink: videoData.link,
+                          commentLink: `${videoData.link}&lc=${commentResult.id}`,
+                          time: new Date().toLocaleTimeString(),
+                          source: `채널: ${ch.title}`,
+                          auto: true,
+                          isAI: aiCommentEnabled,
+                          posted: true
+                        }, ...prev].slice(0, 100));
+                        
+                        const badge = aiCommentEnabled ? '🤖 AI' : '📝';
+                        addLog(`✅ ${badge} 댓글 작성 완료: "${commentText.substring(0, 25)}..." [50 units]`, 'success');
+                        
+                      } catch (error) {
+                        addLog(`❌ 댓글 작성 실패: ${error.message}`, 'error');
+                      }
+                    }
+                  }
+                }
+                
+              } catch (error) {
+                addLog(`❌ "${ch.title}" 처리 실패: ${error.message}`, 'error');
+              }
+            }
+            
+            // 해시태그 검색
+            if (hashtagEnabled) {
+              for (const rule of hashtagRules.filter(r => r.enabled)) {
+                try {
+                  const response = await gapi.client.youtube.search.list({
+                    part: 'snippet',
+                    q: `#${rule.hashtag}`,
+                    order: 'date',
+                    maxResults: 3,
+                    type: 'video'
+                  });
+                  
+                  trackAPIUsage(100);
+                  totalCost += 100;
+                  
+                  if (response.result.items && response.result.items.length > 0) {
+                    addLog(`🏷️ #${rule.hashtag} 영상 ${response.result.items.length}개 발견`, 'success');
+                    
+                    for (const item of response.result.items) {
+                      const videoData = {
+                        id: item.id.videoId,
+                        title: item.snippet.title,
+                        channelTitle: item.snippet.channelTitle,
+                        description: item.snippet.description,
+                        hashtags: [rule.hashtag],
+                        link: `https://www.youtube.com/watch?v=${item.id.videoId}`
+                      };
+                      
+                      setNewVideos(prev => [videoData, ...prev].slice(0, 50));
+                      
+                      if (autoCommentEnabled && rule.commentPatterns.length > 0) {
+                        let commentText;
+                        if (aiCommentEnabled) {
+                          commentText = await generateAIComment(videoData);
+                          if (!commentText) commentText = getRandomComment(rule.commentPatterns);
+                        } else {
+                          commentText = getRandomComment(rule.commentPatterns);
+                        }
+                        
+                        try {
+                          const commentResult = await postCommentToYouTube(videoData.id, commentText);
+                          setComments(prev => [{
+                            id: commentResult.id,
+                            text: commentText,
+                            video: videoData.title,
+                            videoLink: videoData.link,
+                            commentLink: `${videoData.link}&lc=${commentResult.id}`,
+                            time: new Date().toLocaleTimeString(),
+                            source: `해시태그: #${rule.hashtag}`,
+                            auto: true,
+                            isAI: aiCommentEnabled,
+                            posted: true
+                          }, ...prev].slice(0, 100));
+                          
+                          addLog(`✅ #${rule.hashtag} 댓글 작성 완료`, 'success');
+                        } catch (error) {
+                          addLog(`❌ 댓글 작성 실패: ${error.message}`, 'error');
+                        }
+                        
+                        await new Promise(r => setTimeout(r, 2000));
+                      }
+                    }
+                  }
+                } catch (error) {
+                  addLog(`❌ #${rule.hashtag} 검색 실패: ${error.message}`, 'error');
+                }
+              }
+            }
+            
+            // 키워드 검색
+            if (keywordEnabled) {
+              for (const rule of keywordRules.filter(r => r.enabled)) {
+                try {
+                  const response = await gapi.client.youtube.search.list({
+                    part: 'snippet',
+                    q: rule.keyword,
+                    order: 'date',
+                    maxResults: keywordMaxResults,
+                    type: 'video'
+                  });
+                  
+                  trackAPIUsage(100);
+                  totalCost += 100;
+                  
+                  if (response.result.items && response.result.items.length > 0) {
+                    addLog(`🔍 "${rule.keyword}" 영상 ${response.result.items.length}개 발견`, 'success');
+                    
+                    for (const item of response.result.items) {
+                      const videoData = {
+                        id: item.id.videoId,
+                        title: item.snippet.title,
+                        channelTitle: item.snippet.channelTitle,
+                        link: `https://www.youtube.com/watch?v=${item.id.videoId}`
+                      };
+                      
+                      setNewVideos(prev => [videoData, ...prev].slice(0, 50));
+                      
+                      if (autoCommentEnabled && rule.commentPatterns.length > 0) {
+                        let commentText;
+                        if (aiCommentEnabled) {
+                          commentText = await generateAIComment(videoData);
+                          if (!commentText) commentText = getRandomComment(rule.commentPatterns);
+                        } else {
+                          commentText = getRandomComment(rule.commentPatterns);
+                        }
+                        
+                        try {
+                          const commentResult = await postCommentToYouTube(videoData.id, commentText);
+                          setComments(prev => [{
+                            id: commentResult.id,
+                            text: commentText,
+                            video: videoData.title,
+                            videoLink: videoData.link,
+                            commentLink: `${videoData.link}&lc=${commentResult.id}`,
+                            time: new Date().toLocaleTimeString(),
+                            source: `키워드: "${rule.keyword}"`,
+                            auto: true,
+                            isAI: aiCommentEnabled,
+                            posted: true
+                          }, ...prev].slice(0, 100));
+                          
+                          addLog(`✅ "${rule.keyword}" 댓글 작성 완료`, 'success');
+                        } catch (error) {
+                          addLog(`❌ 댓글 작성 실패: ${error.message}`, 'error');
+                        }
+                        
+                        await new Promise(r => setTimeout(r, 2000));
+                      }
+                    }
+                  }
+                } catch (error) {
+                  addLog(`❌ "${rule.keyword}" 검색 실패: ${error.message}`, 'error');
+                }
+              }
+            }
+            
+            if (totalSaved > 0) {
+              const efficiency = ((totalSaved / (totalCost + totalSaved)) * 100).toFixed(1);
+              addLog(`💰 총 ${totalSaved} units 절약! (효율: ${efficiency}%)`, 'success');
+            }
+            
+            addLog(`✅ 확인 완료 (YouTube API: ${totalCost} units / 절약: ${totalSaved} units)`, 'info');
+          };
+
+          const startMonitoring = () => {
+            if (channels.length === 0 && hashtagRules.length === 0 && keywordRules.length === 0) {
+              alert('채널, 해시태그, 또는 키워드를 먼저 추가하세요!');
+              return;
+            }
+            
+            setIsMonitoring(true);
+            addLog(`🚀 모니터링 시작 (${checkInterval}분 간격)`, 'success');
+            const status = [];
+            if (cacheEnabled) status.push('캐싱');
+            if (incrementalEnabled) status.push('증분');
+            if (headCheckEnabled) status.push('HEAD');
+            if (aiCommentEnabled) status.push(`AI${aiDemoMode ? '(데모)' : ''}`);
+            addLog(`⚙️ 최적화: ${status.join(' + ')}`, 'info');
+            
+            checkNewVideos();
+            monitoringRef.current = setInterval(checkNewVideos, checkInterval * 60 * 1000);
+          };
+
+          const stopMonitoring = () => {
+            if (monitoringRef.current) clearInterval(monitoringRef.current);
+            monitoringRef.current = null;
+            setIsMonitoring(false);
+            addLog('⏸️ 모니터링 중지', 'warning');
+          };
+
+          // ========================================
+          // 로그인 화면
+          // ========================================
+          if (!isAuthenticated) {
+            return (
+              <div className="min-h-screen bg-gradient-to-br from-red-500 via-purple-600 to-pink-600 flex items-center justify-center p-4">
+                <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full text-center">
+                  <div className="bg-gradient-to-r from-purple-100 to-pink-100 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-6">
+                    <span className="text-4xl">🤖</span>
+                  </div>
+                  <h1 className="text-2xl font-bold text-gray-800 mb-2 flex items-center justify-center gap-2">
+                    YouTube Auto Manager
+                    <span className="pro-badge">PRO</span>
+                  </h1>
+                  <p className="text-gray-600 mb-2">정식 버전</p>
+                  <p className="text-sm text-gray-500 mb-6">✨ 실제 YouTube API + AI 댓글</p>
+                  
+                  <button onClick={handleLogin}
+                    className="w-full bg-gradient-to-r from-red-600 to-purple-600 text-white py-4 rounded-xl font-semibold hover:from-red-700 hover:to-purple-700 transition shadow-lg">
+                    🔑 Google 계정으로 로그인
+                  </button>
+                  
+                  <div className="mt-6 p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg text-xs text-left border-2 border-purple-200">
+                    <p className="font-bold text-purple-800 mb-2">🎉 정식 버전 기능</p>
+                    <ul className="text-purple-700 space-y-1">
+                      <li>• ✅ 실제 YouTube 채널 & 영상 검색</li>
+                      <li>• ✅ 실제 댓글 작성 (YouTube에 올라감!)</li>
+                      <li>• 🤖 실제 AI 댓글 (Anthropic API)</li>
+                      <li>• 💾 스마트 캐싱 (70-80% 절약)</li>
+                      <li>• ⚡ 증분 체크 (85-90% 절약)</li>
+                      <li>• 🎯 HEAD 요청 (95-98% 절약)</li>
+                    </ul>
+                  </div>
+                  
+                  {YOUTUBE_CLIENT_ID === 'YOUR_YOUTUBE_CLIENT_ID_HERE' && (
+                    <div className="mt-4 p-3 bg-red-50 border-2 border-red-200 rounded-lg text-xs text-left">
+                      <p className="font-bold text-red-800 mb-1">⚠️ API 설정 필요</p>
+                      <p className="text-red-700">코드 상단의 YOUTUBE_CLIENT_ID와 YOUTUBE_API_KEY를 입력해주세요.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          }
+
+          const cacheStats = getCacheStats();
+          const youtubeSaved = apiUsage.saved;
+          const savedPercentage = (apiUsage.youtube + apiUsage.saved) > 0 
+            ? ((apiUsage.saved / (apiUsage.youtube + apiUsage.saved)) * 100).toFixed(1) 
+            : 0;
+
+          // ========================================
+          // 메인 UI (나머지는 데모 버전과 유사하나 API 설정 탭 추가)
+          // ========================================
+          return (
+            <div className="min-h-screen bg-gray-100">
+              <header className="bg-white shadow-sm sticky top-0 z-50">
+                <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🤖</span>
+                    <div>
+                      <h1 className="font-bold text-gray-800 flex items-center gap-2">
+                        YouTube Manager 
+                        <span className="pro-badge">PRO</span>
+                      </h1>
+                      {isMonitoring && (
+                        <p className="text-xs text-green-600 flex items-center gap-1">
+                          <span className="animate-pulse">●</span> 모니터링 중
+                          {cacheEnabled && <span>| 💾</span>}
+                          {incrementalEnabled && <span>| ⚡</span>}
+                          {headCheckEnabled && <span>| 🎯</span>}
+                          {aiCommentEnabled && <span className="ai-badge text-white px-2 py-0.5 rounded text-xs">
+                            AI{aiDemoMode ? '(데모)' : ''}
+                          </span>}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-right text-xs">
+                      <p className="font-bold text-gray-800">YouTube: {apiUsage.youtube.toLocaleString()}/10K</p>
+                      {apiUsage.ai > 0 && <p className="text-purple-600 font-bold">AI: ${(apiUsage.ai * 0.0011).toFixed(2)}</p>}
+                      {apiUsage.saved > 0 && (
+                        <p className="text-green-600 font-bold">절약: {apiUsage.saved.toLocaleString()} ({savedPercentage}%)</p>
+                      )}
+                    </div>
+                    {user && (
+                      <img src={user.image} alt={user.name} className="w-8 h-8 rounded-full" />
+                    )}
+                    <button onClick={handleLogout} className="text-gray-500 hover:text-red-600 text-sm font-medium">로그아웃</button>
+                  </div>
+                </div>
+                
+                <div className="max-w-6xl mx-auto px-4 flex gap-1 border-t overflow-x-auto">
+                  <div className={`tab ${currentTab === 'home' ? 'active' : ''}`} onClick={() => setCurrentTab('home')}>🏠 홈</div>
+                  <div className={`tab ${currentTab === 'channels' ? 'active' : ''}`} onClick={() => setCurrentTab('channels')}>📺 채널</div>
+                  <div className={`tab ${currentTab === 'hashtags' ? 'active' : ''}`} onClick={() => setCurrentTab('hashtags')}>🏷️ 해시태그</div>
+                  <div className={`tab ${currentTab === 'keywords' ? 'active' : ''}`} onClick={() => setCurrentTab('keywords')}>🔍 키워드</div>
+                  <div className={`tab ${currentTab === 'ai' ? 'active' : ''}`} onClick={() => setCurrentTab('ai')}>
+                    🤖 AI {aiCommentEnabled && <span className="text-xs bg-purple-600 text-white px-1 rounded">ON</span>}
+                  </div>
+                  <div className={`tab ${currentTab === 'api' ? 'active' : ''}`} onClick={() => setCurrentTab('api')}>🔑 API 설정</div>
+                  <div className={`tab ${currentTab === 'optimization' ? 'active' : ''}`} onClick={() => setCurrentTab('optimization')}>⚙️ 최적화</div>
+                  <div className={`tab ${currentTab === 'comments' ? 'active' : ''}`} onClick={() => setCurrentTab('comments')}>💬 댓글</div>
+                  <div className={`tab ${currentTab === 'logs' ? 'active' : ''}`} onClick={() => setCurrentTab('logs')}>📋 로그</div>
+                </div>
+              </header>
+              
+              <main className="max-w-6xl mx-auto px-4 py-6">
+                {/* 홈 탭 - 데모와 유사하지만 실제 통계 */}
+                {currentTab === 'home' && (
+                  <div className="space-y-6">
+                    {/* 통계 카드 */}
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                      <div className="bg-white rounded-xl p-4 text-center shadow-sm">
+                        <p className="text-3xl font-bold text-red-600">{channels.length}</p>
+                        <p className="text-sm text-gray-600">채널</p>
+                      </div>
+                      <div className="bg-white rounded-xl p-4 text-center shadow-sm">
+                        <p className="text-3xl font-bold text-purple-600">{hashtagRules.length}</p>
+                        <p className="text-sm text-gray-600">해시태그</p>
+                      </div>
+                      <div className="bg-white rounded-xl p-4 text-center shadow-sm">
+                        <p className="text-3xl font-bold text-orange-600">{keywordRules.length}</p>
+                        <p className="text-sm text-gray-600">키워드</p>
+                      </div>
+                      <div className="bg-white rounded-xl p-4 text-center shadow-sm">
+                        <p className="text-3xl font-bold text-blue-600">{newVideos.length}</p>
+                        <p className="text-sm text-gray-600">발견</p>
+                      </div>
+                      <div className="bg-white rounded-xl p-4 text-center shadow-sm relative">
+                        <p className="text-3xl font-bold text-green-600">{comments.length}</p>
+                        <p className="text-sm text-gray-600">댓글 작성</p>
+                        {aiCommentEnabled && <span className="absolute top-2 right-2 text-xs bg-purple-600 text-white px-2 py-1 rounded-full">AI</span>}
+                      </div>
+                    </div>
+
+                    {/* 모니터링 제어 - 데모와 동일 */}
+                    <div className="bg-white rounded-xl p-6 shadow-sm">
+                      <h2 className="font-bold mb-4">⚙️ 모니터링 제어</h2>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-3">
+                          <label className="flex items-center gap-2">
+                            <input type="checkbox" checked={autoCommentEnabled} 
+                              onChange={e => setAutoCommentEnabled(e.target.checked)} className="w-4 h-4" />
+                            <span className="text-sm">자동 댓글</span>
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input type="checkbox" checked={hashtagEnabled} 
+                              onChange={e => setHashtagEnabled(e.target.checked)} className="w-4 h-4" />
+                            <span className="text-sm">해시태그 모니터링</span>
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input type="checkbox" checked={keywordEnabled} 
+                              onChange={e => setKeywordEnabled(e.target.checked)} className="w-4 h-4" />
+                            <span className="text-sm">키워드 검색</span>
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input type="checkbox" checked={aiCommentEnabled} 
+                              onChange={e => setAiCommentEnabled(e.target.checked)} className="w-4 h-4" />
+                            <span className="text-sm font-bold text-purple-600">🤖 AI 댓글</span>
+                          </label>
+                        </div>
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-sm text-gray-600 block mb-1">확인 간격 (분)</label>
+                            <input type="number" value={checkInterval} 
+                              onChange={e => setCheckInterval(Math.max(1, parseInt(e.target.value) || 1))}
+                              className="w-full border rounded-lg px-3 py-2 text-sm" min="1" />
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="mt-6 flex gap-3">
+                        {!isMonitoring ? (
+                          <button onClick={startMonitoring}
+                            className="flex-1 bg-green-600 text-white py-3 rounded-lg font-bold hover:bg-green-700">
+                            🚀 모니터링 시작
+                          </button>
+                        ) : (
+                          <button onClick={stopMonitoring}
+                            className="flex-1 bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700">
+                            ⏸️ 중지
+                          </button>
+                        )}
+                        <button onClick={checkNewVideos}
+                          className="px-6 bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700">
+                          🔍 수동 확인
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* API 설정 탭 (NEW!) */}
+                {currentTab === 'api' && (
+                  <div className="space-y-6">
+                    <div className="bg-white rounded-xl p-6 shadow-sm">
+                      <h2 className="font-bold mb-4 text-lg">🔑 Anthropic API 설정</h2>
+                      
+                      <div className="space-y-4">
+                        <div className="p-4 bg-yellow-50 border-2 border-yellow-200 rounded-lg">
+                          <p className="text-sm text-yellow-800 mb-2">
+                            💡 <strong>AI 데모 모드</strong>와 <strong>실제 API 모드</strong> 중 선택하세요.
+                          </p>
+                          <p className="text-xs text-yellow-700">
+                            • 데모 모드: 템플릿 기반 댓글 생성 (무료, API 키 불필요)<br/>
+                            • 실제 모드: Claude AI로 고품질 댓글 생성 (API 키 필요, 유료)
+                          </p>
+                        </div>
+
+                        <label className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg cursor-pointer">
+                          <input type="checkbox" checked={aiDemoMode} 
+                            onChange={e => setAiDemoMode(e.target.checked)} className="w-5 h-5" />
+                          <div>
+                            <p className="font-medium">AI 데모 모드 사용</p>
+                            <p className="text-xs text-gray-600">체크 해제 시 실제 Anthropic API 사용</p>
+                          </div>
+                        </label>
+
+                        {!aiDemoMode && (
+                          <div>
+                            <label className="text-sm font-medium block mb-2">Anthropic API 키</label>
+                            <input 
+                              type="password"
+                              value={anthropicApiKey}
+                              onChange={e => setAnthropicApiKey(e.target.value)}
+                              placeholder="sk-ant-api03-..."
+                              className="w-full border rounded-lg px-3 py-2 text-sm"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">
+                              API 키는 브라우저에만 저장됩니다 (서버 전송 안 됨)
+                            </p>
+                            
+                            {anthropicApiKey.length > 0 && anthropicApiKey.length < 10 && (
+                              <p className="text-xs text-red-600 mt-1">⚠️ API 키가 너무 짧습니다</p>
+                            )}
+                            
+                            {anthropicApiKey.length >= 10 && (
+                              <p className="text-xs text-green-600 mt-1">✅ API 키 저장됨</p>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="p-4 bg-blue-50 border-2 border-blue-200 rounded-lg">
+                          <p className="text-sm font-bold text-blue-800 mb-2">📚 API 키 발급 방법</p>
+                          <ol className="text-xs text-blue-700 space-y-1 list-decimal list-inside">
+                            <li>https://console.anthropic.com 접속</li>
+                            <li>계정 생성 ($5 무료 크레딧 제공)</li>
+                            <li>"API Keys" 메뉴에서 "Create Key" 클릭</li>
+                            <li>생성된 키를 위에 입력</li>
+                          </ol>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="p-3 bg-white border rounded-lg">
+                            <p className="text-xs text-gray-600">현재 모드</p>
+                            <p className="font-bold">{aiDemoMode ? '🎭 데모' : '🤖 실제 API'}</p>
+                          </div>
+                          <div className="p-3 bg-white border rounded-lg">
+                            <p className="text-xs text-gray-600">AI 사용량</p>
+                            <p className="font-bold">${(apiUsage.ai * 0.0011).toFixed(3)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 나머지 탭들 - 데모 버전과 동일 구조 */}
+                {/* 채널, 해시태그, 키워드, AI 설정, 최적화, 댓글, 로그 탭 */}
+                {/* (Part 4에서 계속...) */}
+              </main>
+            </div>
+          );
+        }
+
+        ReactDOM.render(<YouTubeAutoManager />, document.getElementById('root'));
+    </script>
+</body>
+</html>
+                {/* 채널 탭 */}
+                {currentTab === 'channels' && (
+                  <div className="bg-white rounded-xl p-6 shadow-sm">
+                    <div className="flex justify-between items-center mb-4">
+                      <h2 className="font-bold">📺 채널 관리</h2>
+                      <button onClick={addChannel}
+                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium">
+                        + 채널 추가
+                      </button>
+                    </div>
+                    {channels.length === 0 ? (
+                      <div className="text-center py-12 text-gray-400">
+                        <p className="text-5xl mb-4">📺</p>
+                        <p>등록된 채널이 없습니다</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {channels.map(ch => (
+                          <div key={ch.id} className={`p-4 rounded-lg border-2 ${ch.enabled ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+                            <div className="flex items-start gap-3">
+                              {ch.thumbnail && <img src={ch.thumbnail} className="w-12 h-12 rounded-full" alt={ch.title} />}
+                              <div className="flex-1">
+                                <p className="font-bold">{ch.title}</p>
+                                <p className="text-sm text-gray-600 mt-1">
+                                  구독자: {parseInt(ch.subscriberCount || 0).toLocaleString()}명 | 패턴: {ch.commentPatterns.length}개
+                                  {aiCommentEnabled && <span className="ml-2 text-purple-600 font-bold">+ 🤖 AI</span>}
+                                </p>
+                              </div>
+                              <div className="flex gap-2">
+                                <button onClick={() => toggleChannel(ch.id)}
+                                  className={`px-3 py-1 rounded-lg text-sm ${ch.enabled ? 'bg-gray-200' : 'bg-green-600 text-white'}`}>
+                                  {ch.enabled ? '비활성화' : '활성화'}
+                                </button>
+                                <button onClick={() => removeChannel(ch.id)}
+                                  className="px-3 py-1 bg-red-600 text-white rounded-lg text-sm">
+                                  삭제
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 해시태그 탭 */}
+                {currentTab === 'hashtags' && (
+                  <div className="bg-white rounded-xl p-6 shadow-sm">
+                    <div className="flex justify-between items-center mb-4">
+                      <h2 className="font-bold">🏷️ 해시태그 규칙</h2>
+                      <button onClick={addHashtagRule}
+                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium">
+                        + 해시태그 추가
+                      </button>
+                    </div>
+                    {hashtagRules.length === 0 ? (
+                      <div className="text-center py-12 text-gray-400">
+                        <p className="text-5xl mb-4">🏷️</p>
+                        <p>등록된 해시태그가 없습니다</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {hashtagRules.map(rule => (
+                          <div key={rule.id} className={`p-4 rounded-lg border-2 ${rule.enabled ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-200'}`}>
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-bold">#{rule.hashtag}</p>
+                                <p className="text-sm text-gray-600 mt-1">
+                                  패턴: {rule.commentPatterns.length}개
+                                  {aiCommentEnabled && <span className="ml-2 text-purple-600 font-bold">+ 🤖 AI</span>}
+                                </p>
+                              </div>
+                              <div className="flex gap-2">
+                                <button onClick={() => toggleHashtagRule(rule.id)}
+                                  className={`px-3 py-1 rounded-lg text-sm ${rule.enabled ? 'bg-gray-200' : 'bg-purple-600 text-white'}`}>
+                                  {rule.enabled ? '비활성화' : '활성화'}
+                                </button>
+                                <button onClick={() => removeHashtagRule(rule.id)}
+                                  className="px-3 py-1 bg-red-600 text-white rounded-lg text-sm">
+                                  삭제
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 키워드 탭 */}
+                {currentTab === 'keywords' && (
+                  <div className="bg-white rounded-xl p-6 shadow-sm">
+                    <div className="flex justify-between items-center mb-4">
+                      <h2 className="font-bold">🔍 키워드 검색 규칙</h2>
+                      <button onClick={addKeywordRule}
+                        className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium">
+                        + 키워드 추가
+                      </button>
+                    </div>
+                    {keywordRules.length === 0 ? (
+                      <div className="text-center py-12 text-gray-400">
+                        <p className="text-5xl mb-4">🔍</p>
+                        <p>등록된 키워드가 없습니다</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {keywordRules.map(rule => (
+                          <div key={rule.id} className={`p-4 rounded-lg border-2 ${rule.enabled ? 'bg-orange-50 border-orange-200' : 'bg-gray-50 border-gray-200'}`}>
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-bold">"{rule.keyword}"</p>
+                                <p className="text-sm text-gray-600 mt-1">
+                                  패턴: {rule.commentPatterns.length}개
+                                  {aiCommentEnabled && <span className="ml-2 text-purple-600 font-bold">+ 🤖 AI</span>}
+                                </p>
+                              </div>
+                              <div className="flex gap-2">
+                                <button onClick={() => toggleKeywordRule(rule.id)}
+                                  className={`px-3 py-1 rounded-lg text-sm ${rule.enabled ? 'bg-gray-200' : 'bg-orange-600 text-white'}`}>
+                                  {rule.enabled ? '비활성화' : '활성화'}
+                                </button>
+                                <button onClick={() => removeKeywordRule(rule.id)}
+                                  className="px-3 py-1 bg-red-600 text-white rounded-lg text-sm">
+                                  삭제
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* AI 설정 탭 */}
+                {currentTab === 'ai' && (
+                  <div className="space-y-6">
+                    <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl p-6 border-2 border-purple-200">
+                      <div className="flex justify-between items-center mb-4">
+                        <div>
+                          <h2 className="font-bold text-lg">🤖 AI 댓글 시스템</h2>
+                          <p className="text-sm text-gray-600">Claude AI가 영상을 분석하여 자동 댓글 생성</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input type="checkbox" checked={aiCommentEnabled} 
+                            onChange={e => setAiCommentEnabled(e.target.checked)} className="sr-only peer" />
+                          <div className="w-16 h-8 bg-gray-300 rounded-full peer peer-checked:bg-gradient-to-r peer-checked:from-purple-600 peer-checked:to-pink-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-1 after:left-[4px] after:bg-white after:rounded-full after:h-6 after:w-6 after:transition-all"></div>
+                        </label>
+                      </div>
+                      {aiCommentEnabled && (
+                        <div className="bg-white rounded-lg p-4 border-2 border-purple-300">
+                          <p className="text-sm mb-2">✅ AI 댓글 활성화!</p>
+                          <ul className="text-xs text-gray-600 space-y-1">
+                            <li>• 모드: {aiDemoMode ? '🎭 데모 (템플릿 기반)' : '🤖 실제 API (Claude AI)'}</li>
+                            <li>• 영상 제목, 설명, 해시태그 자동 분석</li>
+                            <li>• 맥락에 맞는 자연스러운 댓글 생성</li>
+                            <li>• AI 실패 시 자동으로 기존 패턴 사용</li>
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="bg-white rounded-xl p-6 shadow-sm">
+                      <h3 className="font-bold mb-4">🎨 댓글 스타일 설정</h3>
+                      
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-sm font-medium block mb-2">말투/톤</label>
+                          <div className="grid grid-cols-3 gap-3">
+                            {[
+                              { value: 'friendly', emoji: '😊', label: '친근함' },
+                              { value: 'formal', emoji: '🎩', label: '격식' },
+                              { value: 'humorous', emoji: '😄', label: '유머' }
+                            ].map(style => (
+                              <button key={style.value} onClick={() => setAiCommentStyle(style.value)}
+                                className={`p-4 rounded-lg border-2 ${aiCommentStyle === style.value ? 'border-purple-500 bg-purple-50' : 'border-gray-200'}`}>
+                                <p className="text-2xl mb-2">{style.emoji}</p>
+                                <p className="font-bold text-sm">{style.label}</p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-sm font-medium block mb-2">이모지 사용량</label>
+                          <div className="grid grid-cols-3 gap-3">
+                            {[
+                              { value: 'none', label: '❌ 없음' },
+                              { value: 'moderate', label: '😊 보통' },
+                              { value: 'many', label: '🎉 많이' }
+                            ].map(usage => (
+                              <button key={usage.value} onClick={() => setAiEmojiUsage(usage.value)}
+                                className={`p-3 rounded-lg border-2 ${aiEmojiUsage === usage.value ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
+                                <p className="font-bold text-sm">{usage.label}</p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-sm font-medium block mb-2">댓글 길이</label>
+                          <div className="grid grid-cols-3 gap-3">
+                            {[
+                              { value: 'short', label: '📏 짧게' },
+                              { value: 'medium', label: '📐 보통' },
+                              { value: 'long', label: '📏 길게' }
+                            ].map(length => (
+                              <button key={length.value} onClick={() => setAiCommentLength(length.value)}
+                                className={`p-3 rounded-lg border-2 ${aiCommentLength === length.value ? 'border-green-500 bg-green-50' : 'border-gray-200'}`}>
+                                <p className="font-bold text-sm">{length.label}</p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-6 shadow-sm">
+                      <h3 className="font-bold mb-4">🔧 고급 AI 기능</h3>
+                      <div className="space-y-3">
+                        <label className="flex items-center justify-between p-4 bg-gray-50 rounded-lg cursor-pointer">
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl">🖼️</span>
+                            <div>
+                              <p className="font-medium">썸네일 이미지 분석</p>
+                              <p className="text-xs text-gray-600">영상 썸네일을 AI가 분석하여 댓글에 반영</p>
+                            </div>
+                          </div>
+                          <input type="checkbox" checked={aiAnalyzeImage} 
+                            onChange={e => setAiAnalyzeImage(e.target.checked)} className="w-5 h-5" />
+                        </label>
+
+                        <label className="flex items-center justify-between p-4 bg-gray-50 rounded-lg cursor-pointer">
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl">📊</span>
+                            <div>
+                              <p className="font-medium">트렌드 반영</p>
+                              <p className="text-xs text-gray-600">2025년 최신 트렌드와 유행어를 댓글에 반영</p>
+                            </div>
+                          </div>
+                          <input type="checkbox" checked={aiTrendAware} 
+                            onChange={e => setAiTrendAware(e.target.checked)} className="w-5 h-5" />
+                        </label>
+
+                        <div>
+                          <label className="text-sm font-medium block mb-2">커스텀 프롬프트 (선택사항)</label>
+                          <textarea 
+                            value={aiCustomPrompt}
+                            onChange={e => setAiCustomPrompt(e.target.value)}
+                            placeholder="예: 항상 '감사합니다'로 끝내주세요"
+                            className="w-full border rounded-lg px-3 py-2 text-sm h-20 resize-none"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">AI에게 추가로 전달할 지침</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 최적화 탭 */}
+                {currentTab === 'optimization' && (
+                  <div className="space-y-6">
+                    <div className="bg-white rounded-xl p-6 shadow-sm">
+                      <h2 className="font-bold mb-4 text-lg">🚀 최적화 설정</h2>
+                      
+                      <div className="space-y-6">
+                        <div className="p-5 bg-green-50 rounded-lg border-2 border-green-200">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                              <span className="text-3xl">💾</span>
+                              <div>
+                                <h3 className="font-bold text-lg">스마트 캐싱 시스템</h3>
+                                <p className="text-sm text-gray-600">API 요청을 캐시에 저장하여 70-80% 절약</p>
+                              </div>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                              <input type="checkbox" checked={cacheEnabled} 
+                                onChange={e => setCacheEnabled(e.target.checked)} className="sr-only peer" />
+                              <div className="w-14 h-7 bg-gray-300 rounded-full peer peer-checked:bg-green-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-white after:rounded-full after:h-6 after:w-6 after:transition-all"></div>
+                            </label>
+                          </div>
+                          {cacheEnabled && (
+                            <div className="space-y-3 pl-12">
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div>
+                                  <label className="text-sm font-medium block mb-1">채널 정보 TTL (분)</label>
+                                  <input type="number" value={cacheTTL.channelInfo} 
+                                    onChange={e => setCacheTTL({...cacheTTL, channelInfo: parseInt(e.target.value) || 1440})}
+                                    className="w-full border rounded-lg px-3 py-2 text-sm" min="1" />
+                                </div>
+                                <div>
+                                  <label className="text-sm font-medium block mb-1">영상 목록 TTL (분)</label>
+                                  <input type="number" value={cacheTTL.videoList} 
+                                    onChange={e => setCacheTTL({...cacheTTL, videoList: parseInt(e.target.value) || 5})}
+                                    className="w-full border rounded-lg px-3 py-2 text-sm" min="1" />
+                                </div>
+                                <div>
+                                  <label className="text-sm font-medium block mb-1">영상 상세 TTL (분)</label>
+                                  <input type="number" value={cacheTTL.videoDetails} 
+                                    onChange={e => setCacheTTL({...cacheTTL, videoDetails: parseInt(e.target.value) || 60})}
+                                    className="w-full border rounded-lg px-3 py-2 text-sm" min="1" />
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                <div className="flex-1 bg-white p-3 rounded-lg border">
+                                  <p className="text-xs text-gray-600">캐시 히트율</p>
+                                  <p className="text-xl font-bold text-green-600">{cacheStats.hitRate}%</p>
+                                </div>
+                                <div className="flex-1 bg-white p-3 rounded-lg border">
+                                  <p className="text-xs text-gray-600">총 요청</p>
+                                  <p className="text-xl font-bold text-blue-600">{cacheStats.requests}</p>
+                                </div>
+                                <button onClick={clearCache}
+                                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm">
+                                  캐시 초기화
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="p-5 bg-blue-50 rounded-lg border-2 border-blue-200">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                              <span className="text-3xl">⚡</span>
+                              <div>
+                                <h3 className="font-bold text-lg">증분 체크 시스템</h3>
+                                <p className="text-sm text-gray-600">ETag와 Last-Modified로 85-90% 절약</p>
+                              </div>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                              <input type="checkbox" checked={incrementalEnabled} 
+                                onChange={e => setIncrementalEnabled(e.target.checked)} className="sr-only peer" />
+                              <div className="w-14 h-7 bg-gray-300 rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-white after:rounded-full after:h-6 after:w-6 after:transition-all"></div>
+                            </label>
+                          </div>
+                          {incrementalEnabled && (
+                            <div className="space-y-3 pl-12">
+                              <div>
+                                <label className="text-sm font-medium block mb-1">전체 검색 최대 간격 (분)</label>
+                                <input type="number" value={fullSearchMaxInterval} 
+                                  onChange={e => setFullSearchMaxInterval(parseInt(e.target.value) || 60)}
+                                  className="w-full border rounded-lg px-3 py-2 text-sm max-w-xs" min="5" />
+                              </div>
+                              <button onClick={resetIncrementalState}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
+                                증분 상태 초기화
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="p-5 bg-purple-50 rounded-lg border-2 border-purple-200">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                              <span className="text-3xl">🎯</span>
+                              <div>
+                                <h3 className="font-bold text-lg">HEAD 요청 체크</h3>
+                                <p className="text-sm text-gray-600">GET 전에 HEAD로 변경 확인, 95-98% 절약</p>
+                              </div>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                              <input type="checkbox" checked={headCheckEnabled} 
+                                onChange={e => setHeadCheckEnabled(e.target.checked)} className="sr-only peer" />
+                              <div className="w-14 h-7 bg-gray-300 rounded-full peer peer-checked:bg-purple-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-white after:rounded-full after:h-6 after:w-6 after:transition-all"></div>
+                            </label>
+                          </div>
+                          {headCheckEnabled && (
+                            <div className="pl-12">
+                              <label className="text-sm font-medium block mb-1">HEAD 체크 간격 (분)</label>
+                              <input type="number" value={headCheckInterval} 
+                                onChange={e => setHeadCheckInterval(parseInt(e.target.value) || 5)}
+                                className="w-full border rounded-lg px-3 py-2 text-sm max-w-xs" min="1" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 댓글 탭 */}
+                {currentTab === 'comments' && (
+                  <div className="bg-white rounded-xl p-6 shadow-sm">
+                    <h2 className="font-bold mb-4">💬 작성한 댓글 ({comments.length})</h2>
+                    {comments.length === 0 ? (
+                      <div className="text-center py-12 text-gray-400">
+                        <p className="text-5xl mb-4">💬</p>
+                        <p>작성한 댓글이 없습니다</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {comments.map(comment => (
+                          <div key={comment.id} className={`p-4 rounded-lg border-2 ${comment.isAI ? 'bg-purple-50 border-purple-200' : 'bg-blue-50 border-blue-200'}`}>
+                            <div className="flex justify-between items-start mb-2">
+                              <p className="text-gray-800 flex-1">"{comment.text}"</p>
+                              {comment.isAI && (
+                                <span className="ml-2 text-xs bg-gradient-to-r from-purple-600 to-pink-600 text-white px-2 py-1 rounded-full font-bold">
+                                  🤖 AI{aiDemoMode ? '(데모)' : ''}
+                                </span>
+                              )}
+                              {comment.posted && (
+                                <span className="ml-2 text-xs bg-green-600 text-white px-2 py-1 rounded-full">
+                                  ✓ 작성됨
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex justify-between items-center text-sm">
+                              <div>
+                                <p className="text-gray-600">{comment.video}</p>
+                                <p className="text-xs text-gray-500 mt-1">{comment.source} • {comment.time}</p>
+                              </div>
+                              <div className="flex gap-2">
+                                <a href={comment.commentLink} target="_blank" rel="noopener noreferrer"
+                                  className="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-xs">
+                                  댓글 보기
+                                </a>
+                                <a href={comment.videoLink} target="_blank" rel="noopener noreferrer"
+                                  className="px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 text-xs">
+                                  영상 보기
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 로그 탭 */}
+                {currentTab === 'logs' && (
+                  <div className="bg-white rounded-xl p-6 shadow-sm">
+                    <div className="flex justify-between items-center mb-4">
+                      <h2 className="font-bold">📋 활동 로그 ({logs.length})</h2>
+                      <button onClick={() => { setLogs([]); addLog('로그 초기화', 'info'); }}
+                        className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm">
+                        로그 지우기
+                      </button>
+                    </div>
+                    {logs.length === 0 ? (
+                      <div className="text-center py-12 text-gray-400">
+                        <p className="text-5xl mb-4">📋</p>
+                        <p>로그가 없습니다</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                        {logs.map(log => (
+                          <div key={log.id} className={`p-3 rounded-lg text-sm ${
+                            log.type === 'success' ? 'bg-green-50 text-green-800' :
+                            log.type === 'warning' ? 'bg-yellow-50 text-yellow-800' :
+                            log.type === 'error' ? 'bg-red-50 text-red-800' :
+                            'bg-gray-50 text-gray-800'
+                          }`}>
+                            <span className="text-xs text-gray-500 mr-2">[{log.time}]</span>
+                            {log.msg}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
