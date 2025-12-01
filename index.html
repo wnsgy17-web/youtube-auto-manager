@@ -26,12 +26,14 @@
           const [user, setUser] = useState(null);
           const [currentTab, setCurrentTab] = useState('home');
           const [channels, setChannels] = useState([]);
+          const [hashtags, setHashtags] = useState([]); // 🆕 해시태그
           const [comments, setComments] = useState([]);
           const [logs, setLogs] = useState([]);
           const [isMonitoring, setIsMonitoring] = useState(false);
           const [apiUsage, setApiUsage] = useState({ youtube: 0 });
           const [monitoringInterval, setMonitoringInterval] = useState(5); // 분 단위
           const [lastCheck, setLastCheck] = useState({});
+          const [commentFilter, setCommentFilter] = useState('all'); // 🆕 댓글 필터
           
           // Refs
           const tokenClientRef = useRef(null);
@@ -47,6 +49,7 @@
             if (saved) {
               const data = JSON.parse(saved);
               if (data.channels) setChannels(data.channels);
+              if (data.hashtags) setHashtags(data.hashtags);
               if (data.comments) setComments(data.comments);
               if (data.logs) setLogs(data.logs);
               if (data.apiUsage) setApiUsage(data.apiUsage);
@@ -58,9 +61,9 @@
           // Save to localStorage
           useEffect(() => {
             localStorage.setItem('yt_fetch_data', JSON.stringify({
-              channels, comments, logs, apiUsage, monitoringInterval, lastCheck
+              channels, hashtags, comments, logs, apiUsage, monitoringInterval, lastCheck
             }));
-          }, [channels, comments, logs, apiUsage, monitoringInterval, lastCheck]);
+          }, [channels, hashtags, comments, logs, apiUsage, monitoringInterval, lastCheck]);
           
           // Cleanup on unmount
           useEffect(() => {
@@ -326,6 +329,44 @@
             ));
           };
           
+          // Hashtag Management
+          const addHashtag = () => {
+            const tag = prompt('해시태그를 입력하세요 (# 없이):');
+            if (!tag || !tag.trim()) return;
+            
+            const patterns = prompt('댓글 패턴을 입력하세요 (줄바꿈으로 구분):')
+              ?.split('\n').filter(p => p.trim());
+            
+            if (!patterns || patterns.length === 0) {
+              addLog('❌ 댓글 패턴이 필요합니다', 'error');
+              return;
+            }
+            
+            const newHashtag = {
+              id: `hashtag_${Date.now()}`,
+              tag: tag.trim().replace(/^#/, ''), // # 제거
+              patterns,
+              enabled: true,
+              addedAt: new Date().toISOString()
+            };
+            
+            setHashtags(prev => [...prev, newHashtag]);
+            addLog(`✅ 해시태그 추가됨: #${newHashtag.tag}`, 'success');
+          };
+          
+          const removeHashtag = (id) => {
+            if (confirm('이 해시태그를 삭제하시겠습니까?')) {
+              setHashtags(prev => prev.filter(h => h.id !== id));
+              addLog('✅ 해시태그 삭제됨', 'info');
+            }
+          };
+          
+          const toggleHashtag = (id) => {
+            setHashtags(prev => prev.map(h =>
+              h.id === id ? { ...h, enabled: !h.enabled } : h
+            ));
+          };
+          
           // Monitoring
           const checkNewVideos = async () => {
             const activeChannels = channels.filter(c => c.enabled);
@@ -373,12 +414,18 @@
                       videoTitle: video.snippet.title,
                       text: pattern,
                       timestamp: new Date().toISOString(),
-                      channel: channel.name
+                      channel: channel.name,
+                      // 🆕 출처 정보
+                      source: 'channel',
+                      sourceDetail: channel.name,
+                      method: 'monitoring',
+                      icon: '📺',
+                      label: '채널'
                     };
                     
                     setComments(prev => [newComment, ...prev]);
                     setApiUsage(prev => ({ ...prev, youtube: prev.youtube + 50 }));
-                    addLog(`✅ 댓글 작성 완료!`, 'success');
+                    addLog(`✅ [📺 채널] ${channel.name} - 댓글 작성 완료!`, 'success');
                     addLog(`🔗 댓글 링크: ${commentLink}`, 'info');
                   } catch (error) {
                     addLog(`❌ 댓글 작성 실패: ${error.message}`, 'error');
@@ -395,6 +442,84 @@
                 addLog(`❌ ${channel.name} 처리 실패: ${error.message}`, 'error');
               }
             }
+            
+            // 해시태그 모니터링
+            const activeHashtags = hashtags.filter(h => h.enabled);
+            
+            for (const hashtag of activeHashtags) {
+              try {
+                addLog(`🔍 해시태그 #${hashtag.tag} 검색 중...`, 'info');
+                
+                // 해시태그로 영상 검색
+                const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=%23${encodeURIComponent(hashtag.tag)}&type=video&order=date&maxResults=5&key=${YOUTUBE_API_KEY}`;
+                const searchResponse = await fetch(searchUrl);
+                const searchData = await searchResponse.json();
+                setApiUsage(prev => ({ ...prev, youtube: prev.youtube + 100 }));
+                
+                if (!searchData.items || searchData.items.length === 0) {
+                  addLog(`📹 #${hashtag.tag}: 새 영상 없음`, 'info');
+                  continue;
+                }
+                
+                // 마지막 체크 이후 새 영상만 필터링
+                const lastCheckTime = lastCheck[hashtag.id] || 0;
+                const newVideos = searchData.items.filter(item => {
+                  const publishedAt = new Date(item.snippet.publishedAt).getTime();
+                  return publishedAt > lastCheckTime;
+                });
+                
+                if (newVideos.length === 0) {
+                  addLog(`📹 #${hashtag.tag}: 새 영상 없음 (마지막 체크: ${new Date(lastCheckTime).toLocaleString('ko-KR')})`, 'info');
+                  continue;
+                }
+                
+                addLog(`📹 #${hashtag.tag}: ${newVideos.length}개 새 영상 발견!`, 'success');
+                
+                // 새 영상에 댓글 작성
+                for (const video of newVideos) {
+                  const pattern = hashtag.patterns[Math.floor(Math.random() * hashtag.patterns.length)];
+                  
+                  addLog(`💬 댓글 작성 중: "${pattern}"`, 'info');
+                  
+                  try {
+                    const result = await youtubeAPI.postComment(video.id.videoId, pattern);
+                    
+                    const commentLink = `https://www.youtube.com/watch?v=${video.id.videoId}&lc=${result.id}`;
+                    
+                    const newComment = {
+                      id: result.id,
+                      videoId: video.id.videoId,
+                      videoTitle: video.snippet.title,
+                      text: pattern,
+                      timestamp: new Date().toISOString(),
+                      channel: video.snippet.channelTitle,
+                      // 🆕 출처 정보
+                      source: 'hashtag',
+                      sourceDetail: `#${hashtag.tag}`,
+                      method: 'hashtag-search',
+                      icon: '🏷️',
+                      label: '해시태그'
+                    };
+                    
+                    setComments(prev => [newComment, ...prev]);
+                    setApiUsage(prev => ({ ...prev, youtube: prev.youtube + 50 }));
+                    addLog(`✅ [🏷️ 해시태그: #${hashtag.tag}] 댓글 작성 완료!`, 'success');
+                    addLog(`🔗 댓글 링크: ${commentLink}`, 'info');
+                  } catch (error) {
+                    addLog(`❌ 댓글 작성 실패: ${error.message}`, 'error');
+                  }
+                }
+                
+                // 마지막 체크 시간 업데이트
+                setLastCheck(prev => ({
+                  ...prev,
+                  [hashtag.id]: Date.now()
+                }));
+                
+              } catch (error) {
+                addLog(`❌ #${hashtag.tag} 처리 실패: ${error.message}`, 'error');
+              }
+            }
           };
           
           const startMonitoring = async () => {
@@ -404,13 +529,21 @@
             }
             
             const activeChannels = channels.filter(c => c.enabled);
-            if (activeChannels.length === 0) {
-              addLog('⚠️ 활성화된 채널이 없습니다', 'warning');
+            const activeHashtags = hashtags.filter(h => h.enabled);
+            
+            if (activeChannels.length === 0 && activeHashtags.length === 0) {
+              addLog('⚠️ 활성화된 채널이나 해시태그가 없습니다', 'warning');
               return;
             }
             
             setIsMonitoring(true);
             addLog(`🚀 모니터링 시작! (${monitoringInterval}분 간격)`, 'success');
+            if (activeChannels.length > 0) {
+              addLog(`📺 채널: ${activeChannels.length}개`, 'info');
+            }
+            if (activeHashtags.length > 0) {
+              addLog(`🏷️ 해시태그: ${activeHashtags.length}개`, 'info');
+            }
             
             // 즉시 한 번 실행
             await checkNewVideos();
@@ -496,6 +629,7 @@
                   {[
                     { id: 'home', label: '🏠 홈' },
                     { id: 'channels', label: '📺 채널' },
+                    { id: 'hashtags', label: '🏷️ 해시태그' },
                     { id: 'comments', label: '💬 댓글' },
                     { id: 'logs', label: '📋 로그' }
                   ].map(tab => (
@@ -543,6 +677,10 @@
                             <span className="ml-2 font-bold text-blue-600">{channels.filter(c => c.enabled).length}개</span>
                           </div>
                           <div>
+                            <span className="text-gray-600">🏷️ 활성 해시태그:</span>
+                            <span className="ml-2 font-bold text-green-600">{hashtags.filter(h => h.enabled).length}개</span>
+                          </div>
+                          <div>
                             <span className="text-gray-600">💬 오늘 작성:</span>
                             <span className="ml-2 font-bold text-green-600">{comments.filter(c => new Date(c.timestamp).toDateString() === new Date().toDateString()).length}개</span>
                           </div>
@@ -550,11 +688,34 @@
                             <span className="text-gray-600">⏱️ 상태:</span>
                             <span className="ml-2 font-bold">{isMonitoring ? '🟢 실행 중' : '⚪ 대기 중'}</span>
                           </div>
-                          <div>
-                            <span className="text-gray-600">📊 API 사용:</span>
-                            <span className="ml-2 font-bold text-purple-600">{apiUsage.youtube} units</span>
-                          </div>
                         </div>
+                        
+                        {/* 출처별 통계 */}
+                        {comments.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-gray-200">
+                            <div className="text-xs font-bold text-gray-700 mb-2">📊 댓글 출처별 통계:</div>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-600">📺 채널:</span>
+                                <span className="font-bold text-blue-600">
+                                  {comments.filter(c => c.source === 'channel').length}개
+                                  ({Math.round(comments.filter(c => c.source === 'channel').length / comments.length * 100)}%)
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-600">🏷️ 해시태그:</span>
+                                <span className="font-bold text-green-600">
+                                  {comments.filter(c => c.source === 'hashtag').length}개
+                                  ({Math.round(comments.filter(c => c.source === 'hashtag').length / comments.length * 100)}%)
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-600">📊 API 사용:</span>
+                                <span className="font-bold text-purple-600">{apiUsage.youtube} units</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                       
                       {/* 모니터링 간격 설정 */}
@@ -717,10 +878,147 @@
                   </div>
                 )}
 
+                {/* Hashtags Tab */}
+                {currentTab === 'hashtags' && (
+                  <div className="bg-white rounded-xl p-6 shadow">
+                    <div className="flex justify-between items-center mb-4">
+                      <h2 className="text-xl font-bold">🏷️ 해시태그 관리</h2>
+                      <button
+                        onClick={addHashtag}
+                        className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600"
+                      >
+                        + 해시태그 추가
+                      </button>
+                    </div>
+                    
+                    {hashtags.length === 0 ? (
+                      <div className="text-center py-12 text-gray-400">
+                        <p className="text-5xl mb-4">🏷️</p>
+                        <p>등록된 해시태그가 없습니다</p>
+                        <p className="text-sm mt-2">위 버튼을 눌러 해시태그를 추가하세요</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {hashtags.map(hashtag => (
+                          <div key={hashtag.id} className="border rounded-lg p-4">
+                            <div className="flex items-center gap-4 mb-3">
+                              <div className="flex-1">
+                                <div className="font-bold text-lg text-green-600">#{hashtag.tag}</div>
+                                <div className="text-xs text-gray-500 mt-1">추가일: {new Date(hashtag.addedAt).toLocaleDateString('ko-KR')}</div>
+                              </div>
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={hashtag.enabled}
+                                  onChange={() => toggleHashtag(hashtag.id)}
+                                />
+                                <span className="text-sm">활성화</span>
+                              </label>
+                              <button
+                                onClick={() => removeHashtag(hashtag.id)}
+                                className="text-red-500 hover:text-red-700 px-3 py-1"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                            
+                            {/* 댓글 패턴 관리 */}
+                            <div className="border-t pt-3 mt-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-sm font-bold text-gray-700">💬 댓글 패턴 ({hashtag.patterns.length}개)</span>
+                                <button
+                                  onClick={() => {
+                                    const newPattern = prompt('새 댓글 패턴을 입력하세요:');
+                                    if (newPattern && newPattern.trim()) {
+                                      setHashtags(prev => prev.map(h => 
+                                        h.id === hashtag.id 
+                                          ? { ...h, patterns: [...h.patterns, newPattern.trim()] }
+                                          : h
+                                      ));
+                                      addLog(`✅ 패턴 추가됨: "${newPattern.trim()}"`, 'success');
+                                    }
+                                  }}
+                                  className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
+                                >
+                                  + 추가
+                                </button>
+                              </div>
+                              
+                              <div className="space-y-2 max-h-40 overflow-y-auto">
+                                {hashtag.patterns.map((pattern, idx) => (
+                                  <div key={idx} className="flex items-center gap-2 bg-gray-50 p-2 rounded text-sm">
+                                    <span className="flex-1 text-gray-700">{pattern}</span>
+                                    <button
+                                      onClick={() => {
+                                        if (confirm(`"${pattern}" 패턴을 삭제하시겠습니까?`)) {
+                                          setHashtags(prev => prev.map(h =>
+                                            h.id === hashtag.id
+                                              ? { ...h, patterns: h.patterns.filter((_, i) => i !== idx) }
+                                              : h
+                                          ));
+                                          addLog(`✅ 패턴 삭제됨`, 'info');
+                                        }
+                                      }}
+                                      className="text-red-500 hover:text-red-700 text-xs"
+                                    >
+                                      삭제
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Comments Tab */}
                 {currentTab === 'comments' && (
                   <div className="bg-white rounded-xl p-6 shadow">
-                    <h2 className="text-xl font-bold mb-4">💬 작성된 댓글</h2>
+                    <div className="flex justify-between items-center mb-4">
+                      <h2 className="text-xl font-bold">💬 작성된 댓글</h2>
+                      <div className="text-sm text-gray-600">
+                        총 {comments.filter(c => commentFilter === 'all' || c.source === commentFilter).length}개
+                      </div>
+                    </div>
+                    
+                    {/* 필터 버튼 */}
+                    {comments.length > 0 && (
+                      <div className="flex gap-2 mb-4 overflow-x-auto">
+                        <button
+                          onClick={() => setCommentFilter('all')}
+                          className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${
+                            commentFilter === 'all'
+                              ? 'bg-blue-500 text-white'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          전체 ({comments.length})
+                        </button>
+                        <button
+                          onClick={() => setCommentFilter('channel')}
+                          className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${
+                            commentFilter === 'channel'
+                              ? 'bg-blue-500 text-white'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          📺 채널 ({comments.filter(c => c.source === 'channel').length})
+                        </button>
+                        <button
+                          onClick={() => setCommentFilter('hashtag')}
+                          className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap ${
+                            commentFilter === 'hashtag'
+                              ? 'bg-green-500 text-white'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          🏷️ 해시태그 ({comments.filter(c => c.source === 'hashtag').length})
+                        </button>
+                      </div>
+                    )}
                     
                     {comments.length === 0 ? (
                       <div className="text-center py-12 text-gray-400">
@@ -730,10 +1028,23 @@
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {comments.map(comment => (
+                        {comments
+                          .filter(c => commentFilter === 'all' || c.source === commentFilter)
+                          .map(comment => (
                           <div key={comment.id} className="border rounded-lg p-4">
                             <div className="flex justify-between items-start mb-2">
-                              <div className="font-medium text-sm text-gray-600">{comment.channel}</div>
+                              <div className="flex items-center gap-2">
+                                {comment.source && (
+                                  <span className={`text-xs px-2 py-1 rounded font-bold ${
+                                    comment.source === 'channel' ? 'bg-blue-100 text-blue-800' :
+                                    comment.source === 'hashtag' ? 'bg-green-100 text-green-800' :
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {comment.icon || '💬'} {comment.label || comment.source}
+                                  </span>
+                                )}
+                                <div className="font-medium text-sm text-gray-600">{comment.sourceDetail || comment.channel}</div>
+                              </div>
                               <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">✓ 작성됨</span>
                             </div>
                             <div className="font-bold mb-2">{comment.videoTitle}</div>
