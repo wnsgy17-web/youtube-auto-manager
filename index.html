@@ -45,7 +45,8 @@
           const [optimization, setOptimization] = useState({
             enabled: true, // 최적화 활성화
             skipCommented: true, // 이미 댓글 단 영상 건너뛰기
-            batchSize: 5 // 배치 크기 제한
+            batchSize: 5, // 배치 크기 제한
+            maxVideoAge: 24 // 최대 영상 나이 (시간) - 기본 24시간 (오늘)
           });
           
           // Refs
@@ -502,6 +503,17 @@
             return videos.slice(0, optimization.batchSize);
           };
           
+          // 영상이 너무 오래되었는지 체크
+          const isVideoTooOld = (publishedAt) => {
+            if (!optimization.enabled || !optimization.maxVideoAge) return false;
+            
+            const now = Date.now();
+            const publishTime = new Date(publishedAt).getTime();
+            const ageInHours = (now - publishTime) / (1000 * 60 * 60);
+            
+            return ageInHours > optimization.maxVideoAge;
+          };
+          
           // 최적화 초기화
           const resetOptimization = () => {
             setCheckedVideoIds({});
@@ -625,6 +637,16 @@ ${videoDescription ? `영상 설명: "${videoDescription.substring(0, 200)}"` : 
                 
                 for (const video of newVideos) {
                   const videoId = video.id.videoId;
+                  const publishedAt = video.snippet.publishedAt;
+                  
+                  // 🆕 영상이 너무 오래되었는지 체크
+                  if (isVideoTooOld(publishedAt)) {
+                    const ageInHours = Math.floor((Date.now() - new Date(publishedAt).getTime()) / (1000 * 60 * 60));
+                    addLog(`⏭️ 건너뜀: 오래된 영상 (${ageInHours}시간 전)`, 'info');
+                    skippedCount++;
+                    setApiUsage(prev => ({ ...prev, saved: prev.saved + 150 }));
+                    continue;
+                  }
                   
                   // 이미 댓글 단 영상 건너뛰기
                   if (isVideoCommented(videoId)) {
@@ -756,6 +778,16 @@ ${videoDescription ? `영상 설명: "${videoDescription.substring(0, 200)}"` : 
                 
                 for (const video of newVideos) {
                   const videoId = video.id.videoId;
+                  const publishedAt = video.snippet.publishedAt;
+                  
+                  // 🆕 영상이 너무 오래되었는지 체크
+                  if (isVideoTooOld(publishedAt)) {
+                    const ageInHours = Math.floor((Date.now() - new Date(publishedAt).getTime()) / (1000 * 60 * 60));
+                    addLog(`⏭️ 건너뜀: 오래된 영상 (${ageInHours}시간 전)`, 'info');
+                    skippedCount++;
+                    setApiUsage(prev => ({ ...prev, saved: prev.saved + 150 }));
+                    continue;
+                  }
                   
                   // 이미 댓글 단 영상 건너뛰기
                   if (isVideoCommented(videoId)) {
@@ -903,6 +935,16 @@ ${videoDescription ? `영상 설명: "${videoDescription.substring(0, 200)}"` : 
                 
                 for (const video of newVideos) {
                   const videoId = video.id.videoId;
+                  const publishedAt = video.snippet.publishedAt;
+                  
+                  // 🆕 영상이 너무 오래되었는지 체크
+                  if (isVideoTooOld(publishedAt)) {
+                    const ageInHours = Math.floor((Date.now() - new Date(publishedAt).getTime()) / (1000 * 60 * 60));
+                    addLog(`⏭️ 건너뜀: 오래된 영상 (${ageInHours}시간 전)`, 'info');
+                    skippedCount++;
+                    setApiUsage(prev => ({ ...prev, saved: prev.saved + 150 }));
+                    continue;
+                  }
                   
                   // 이미 댓글 단 영상 건너뛰기
                   if (isVideoCommented(videoId)) {
@@ -1819,6 +1861,36 @@ ${videoDescription ? `영상 설명: "${videoDescription.substring(0, 200)}"` : 
                           • 권장: 5개 (빠른 체크)<br/>
                           • 새 영상 발견 시 즉시 중단<br/>
                           • 불필요한 API 호출 감소
+                        </div>
+                      </div>
+                      
+                      {/* 🆕 영상 나이 제한 */}
+                      <div className="p-4 bg-orange-50 rounded-lg border border-orange-200">
+                        <h4 className="font-bold mb-2">⏰ 영상 나이 제한 (중요!)</h4>
+                        <p className="text-sm text-gray-600 mb-3">
+                          오늘 올라온 영상만 댓글 작성합니다
+                        </p>
+                        <div className="flex items-center gap-3">
+                          <label className="text-sm font-bold">최대 나이:</label>
+                          <input
+                            type="number"
+                            value={optimization.maxVideoAge}
+                            onChange={(e) => setOptimization(prev => ({ ...prev, maxVideoAge: parseInt(e.target.value) || 24 }))}
+                            disabled={!optimization.enabled}
+                            min="1"
+                            max="168"
+                            className="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-50"
+                          />
+                          <span className="text-sm text-gray-600">시간</span>
+                        </div>
+                        <div className="mt-3 text-xs text-gray-500">
+                          • 권장: 24시간 (오늘) ⭐<br/>
+                          • 48시간: 어제 + 오늘<br/>
+                          • 72시간: 최근 3일<br/>
+                          • 오래된 영상 = 스팸처럼 보임
+                        </div>
+                        <div className="mt-2 p-2 bg-white rounded text-xs">
+                          <span className="font-bold text-orange-600">현재 설정:</span> {optimization.maxVideoAge}시간 이내 영상만
                         </div>
                       </div>
                     </div>
