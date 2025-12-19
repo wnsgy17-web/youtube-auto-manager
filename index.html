@@ -46,7 +46,8 @@
             enabled: true, // 최적화 활성화
             skipCommented: true, // 이미 댓글 단 영상 건너뛰기
             batchSize: 5, // 배치 크기 제한
-            maxVideoAge: 24 // 최대 영상 나이 (시간) - 기본 24시간 (오늘)
+            maxVideoAge: 24, // 최대 영상 나이 (시간) - 기본 24시간 (오늘)
+            commentDelay: 3 // 댓글 작성 후 지연 (초) - 스팸 방지
           });
           
           // Refs
@@ -702,6 +703,11 @@ ${videoDescription ? `영상 설명: "${videoDescription.substring(0, 200)}"` : 
                   try {
                     const result = await youtubeAPI.postComment(video.id.videoId, commentText);
                     
+                    // 🆕 result.id 검증 (스팸 필터 감지)
+                    if (!result || !result.id || result.id.trim() === '') {
+                      throw new Error('댓글 ID가 없음 - YouTube 스팸 필터에 걸렸을 가능성 높음!');
+                    }
+                    
                     const commentLink = `https://www.youtube.com/watch?v=${video.id.videoId}&lc=${result.id}`;
                     
                     const newComment = {
@@ -723,8 +729,16 @@ ${videoDescription ? `영상 설명: "${videoDescription.substring(0, 200)}"` : 
                     setApiUsage(prev => ({ ...prev, youtube: prev.youtube + 50 }));
                     addLog(`✅ [${isAI ? '🤖 AI' : '📺 채널'}] ${channel.name} - 댓글 작성 완료!`, 'success');
                     addLog(`🔗 댓글 링크: ${commentLink}`, 'info');
+                    
+                    // 🆕 댓글 작성 후 지연 (스팸 방지)
+                    addLog(`⏳ ${optimization.commentDelay}초 대기 중... (스팸 방지)`, "info");
+                    await new Promise(resolve => setTimeout(resolve, optimization.commentDelay * 1000));
+                    
                   } catch (error) {
                     addLog(`❌ 댓글 작성 실패: ${error.message}`, 'error');
+                    if (error.message.includes('스팸')) {
+                      addLog(`⚠️ YouTube 스팸 필터 감지! 체크 간격을 늘려주세요 (최소 10분 권장)`, 'warning');
+                    }
                   }
                 }
                 
@@ -843,6 +857,11 @@ ${videoDescription ? `영상 설명: "${videoDescription.substring(0, 200)}"` : 
                   try {
                     const result = await youtubeAPI.postComment(video.id.videoId, commentText);
                     
+                    // 🆕 result.id 검증 (스팸 필터 감지)
+                    if (!result || !result.id || result.id.trim() === '') {
+                      throw new Error('댓글 ID가 없음 - YouTube 스팸 필터에 걸렸을 가능성 높음!');
+                    }
+                    
                     const commentLink = `https://www.youtube.com/watch?v=${video.id.videoId}&lc=${result.id}`;
                     
                     const newComment = {
@@ -864,8 +883,16 @@ ${videoDescription ? `영상 설명: "${videoDescription.substring(0, 200)}"` : 
                     setApiUsage(prev => ({ ...prev, youtube: prev.youtube + 50 }));
                     addLog(`✅ [${isAI ? '🤖 AI' : '🏷️ 해시태그'}] ${isAI ? 'AI 생성' : '#' + hashtag.tag} - 댓글 작성 완료!`, 'success');
                     addLog(`🔗 댓글 링크: ${commentLink}`, 'info');
+                    
+                    // 🆕 댓글 작성 후 지연 (스팸 방지)
+                    addLog(`⏳ ${optimization.commentDelay}초 대기 중... (스팸 방지)`, "info");
+                    await new Promise(resolve => setTimeout(resolve, optimization.commentDelay * 1000));
+                    
                   } catch (error) {
                     addLog(`❌ 댓글 작성 실패: ${error.message}`, 'error');
+                    if (error.message.includes('스팸')) {
+                      addLog(`⚠️ YouTube 스팸 필터 감지! 체크 간격을 늘려주세요 (최소 10분 권장)`, 'warning');
+                    }
                   }
                 }
                 
@@ -1000,6 +1027,11 @@ ${videoDescription ? `영상 설명: "${videoDescription.substring(0, 200)}"` : 
                   try {
                     const result = await youtubeAPI.postComment(video.id.videoId, commentText);
                     
+                    // 🆕 result.id 검증 (스팸 필터 감지)
+                    if (!result || !result.id || result.id.trim() === '') {
+                      throw new Error('댓글 ID가 없음 - YouTube 스팸 필터에 걸렸을 가능성 높음!');
+                    }
+                    
                     const commentLink = `https://www.youtube.com/watch?v=${video.id.videoId}&lc=${result.id}`;
                     
                     const newComment = {
@@ -1021,8 +1053,16 @@ ${videoDescription ? `영상 설명: "${videoDescription.substring(0, 200)}"` : 
                     setApiUsage(prev => ({ ...prev, youtube: prev.youtube + 50 }));
                     addLog(`✅ [${isAI ? '🤖 AI' : '🔍 키워드'}] ${isAI ? 'AI 생성' : '"' + keyword.term + '"'} - 댓글 작성 완료!`, 'success');
                     addLog(`🔗 댓글 링크: ${commentLink}`, 'info');
+                    
+                    // 🆕 댓글 작성 후 지연 (스팸 방지)
+                    addLog(`⏳ ${optimization.commentDelay}초 대기 중... (스팸 방지)`, "info");
+                    await new Promise(resolve => setTimeout(resolve, optimization.commentDelay * 1000));
+                    
                   } catch (error) {
                     addLog(`❌ 댓글 작성 실패: ${error.message}`, 'error');
+                    if (error.message.includes('스팸')) {
+                      addLog(`⚠️ YouTube 스팸 필터 감지! 체크 간격을 늘려주세요 (최소 10분 권장)`, 'warning');
+                    }
                   }
                 }
                 
@@ -1891,6 +1931,45 @@ ${videoDescription ? `영상 설명: "${videoDescription.substring(0, 200)}"` : 
                         </div>
                         <div className="mt-2 p-2 bg-white rounded text-xs">
                           <span className="font-bold text-orange-600">현재 설정:</span> {optimization.maxVideoAge}시간 이내 영상만
+                        </div>
+                      </div>
+                      
+                      {/* 🆕 댓글 작성 지연 (스팸 방지) */}
+                      <div className="p-4 bg-red-50 rounded-lg border border-red-200">
+                        <h4 className="font-bold mb-2">⏱️ 댓글 작성 지연 (스팸 방지) ⭐</h4>
+                        <p className="text-sm text-gray-600 mb-3">
+                          댓글 작성 후 대기 시간 - 스팸 필터 방지
+                        </p>
+                        <div className="flex items-center gap-3">
+                          <label className="text-sm font-bold">지연 시간:</label>
+                          <input
+                            type="number"
+                            value={optimization.commentDelay}
+                            onChange={(e) => setOptimization(prev => ({ ...prev, commentDelay: parseInt(e.target.value) || 3 }))}
+                            disabled={!optimization.enabled}
+                            min="0"
+                            max="60"
+                            className="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50"
+                          />
+                          <span className="text-sm text-gray-600">초</span>
+                        </div>
+                        <div className="mt-3 text-xs text-gray-500">
+                          • 권장: 3-5초 ⭐<br/>
+                          • 0초: 지연 없음 (비추천)<br/>
+                          • 5초: 안전함<br/>
+                          • 10초: 매우 안전함
+                        </div>
+                        <div className="mt-2 p-3 bg-white rounded border border-red-200">
+                          <p className="text-xs font-bold text-red-600 mb-2">⚠️ 중요!</p>
+                          <ul className="text-xs text-gray-700 space-y-1">
+                            <li>• 지연 없이 빠르게 댓글 = 스팸으로 감지</li>
+                            <li>• YouTube가 봇으로 인식</li>
+                            <li>• 댓글 ID 없음 (lc= 뒤가 비어있음)</li>
+                            <li>• 최소 3초 이상 권장!</li>
+                          </ul>
+                        </div>
+                        <div className="mt-2 p-2 bg-white rounded text-xs">
+                          <span className="font-bold text-red-600">현재 설정:</span> 댓글 작성 후 {optimization.commentDelay}초 대기
                         </div>
                       </div>
                     </div>
